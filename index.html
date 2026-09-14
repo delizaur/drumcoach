@@ -1,0 +1,1169 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>Drum Timing Trainer</title>
+
+<style>
+    :root {
+        --bg: #111318;
+        --panel: #1b1e26;
+        --text: #f2f3f5;
+        --muted: #9298a5;
+        --accent: #5eead4;
+        --good: #4ade80;
+        --warning: #facc15;
+        --bad: #fb7185;
+    }
+
+    * {
+        box-sizing: border-box;
+    }
+
+    body {
+        margin: 0;
+        min-height: 100vh;
+        background: var(--bg);
+        color: var(--text);
+        font-family:
+            Inter,
+            system-ui,
+            -apple-system,
+            BlinkMacSystemFont,
+            "Segoe UI",
+            sans-serif;
+    }
+
+    .container {
+        max-width: 900px;
+        margin: 0 auto;
+        padding: 32px 20px 60px;
+    }
+
+    h1 {
+        margin: 0 0 8px;
+        font-size: 32px;
+    }
+
+    .subtitle {
+        color: var(--muted);
+        margin-bottom: 30px;
+    }
+
+    .panel {
+        background: var(--panel);
+        border-radius: 14px;
+        padding: 20px;
+        margin-bottom: 18px;
+    }
+
+    .controls {
+        display: grid;
+        grid-template-columns: 1fr 1fr;
+        gap: 16px;
+    }
+
+    label {
+        display: block;
+        color: var(--muted);
+        font-size: 13px;
+        margin-bottom: 7px;
+    }
+
+    select,
+    input,
+    button {
+        width: 100%;
+        height: 44px;
+        border: 0;
+        border-radius: 8px;
+        padding: 0 12px;
+        font: inherit;
+    }
+
+    select,
+    input {
+        background: #282c36;
+        color: var(--text);
+    }
+
+    button {
+        background: var(--accent);
+        color: #06201c;
+        font-weight: 700;
+        cursor: pointer;
+    }
+
+    button:hover {
+        filter: brightness(1.08);
+    }
+
+    button.stop {
+        background: var(--bad);
+        color: white;
+    }
+
+    button.secondary {
+        background: #303541;
+        color: var(--text);
+    }
+
+    .status {
+        margin-top: 14px;
+        color: var(--muted);
+        font-size: 14px;
+    }
+
+    .status.connected {
+        color: var(--good);
+    }
+
+    .pulse {
+        position: relative;
+        height: 230px;
+        display: flex;
+        align-items: center;
+        justify-content: center;
+        overflow: hidden;
+    }
+
+    .center-line {
+        position: absolute;
+        width: 2px;
+        height: 150px;
+        background: white;
+        opacity: 0.9;
+    }
+
+    .timing-dot {
+        position: absolute;
+        width: 22px;
+        height: 22px;
+        border-radius: 50%;
+        background: var(--accent);
+        box-shadow: 0 0 20px rgba(94, 234, 212, 0.7);
+        transform: translateX(-50%);
+        transition: background 100ms;
+    }
+
+    .scale {
+        position: absolute;
+        left: 8%;
+        right: 8%;
+        height: 1px;
+        background: #454a56;
+    }
+
+    .scale-label {
+        position: absolute;
+        top: calc(50% + 25px);
+        color: var(--muted);
+        font-size: 12px;
+    }
+
+    .scale-label.left {
+        left: 8%;
+    }
+
+    .scale-label.right {
+        right: 8%;
+    }
+
+    .scale-label.center {
+        left: 50%;
+        transform: translateX(-50%);
+    }
+
+    .current-error {
+        text-align: center;
+        font-size: 32px;
+        font-weight: 700;
+        margin-top: 5px;
+    }
+
+    .current-error small {
+        display: block;
+        color: var(--muted);
+        font-size: 13px;
+        font-weight: 400;
+        margin-top: 5px;
+    }
+
+    .stats {
+        display: grid;
+        grid-template-columns: repeat(4, 1fr);
+        gap: 10px;
+    }
+
+    .stat {
+        background: #252933;
+        padding: 16px;
+        border-radius: 10px;
+        text-align: center;
+    }
+
+    .stat-value {
+        font-size: 25px;
+        font-weight: 700;
+    }
+
+    .stat-label {
+        color: var(--muted);
+        font-size: 12px;
+        margin-top: 4px;
+    }
+
+    .hit-list {
+        max-height: 250px;
+        overflow-y: auto;
+        font-family: monospace;
+        font-size: 13px;
+    }
+
+    .hit {
+        display: flex;
+        justify-content: space-between;
+        padding: 7px 4px;
+        border-bottom: 1px solid #292d36;
+    }
+
+    .early {
+        color: var(--accent);
+    }
+
+    .late {
+        color: var(--bad);
+    }
+
+    .on-time {
+        color: var(--good);
+    }
+
+    .metronome {
+        text-align: center;
+        margin-bottom: 12px;
+    }
+
+    .beat-number {
+        font-size: 48px;
+        font-weight: 800;
+        height: 60px;
+    }
+
+    .beat-label {
+        color: var(--muted);
+        font-size: 13px;
+    }
+
+    @media (max-width: 650px) {
+        .controls,
+        .stats {
+            grid-template-columns: 1fr 1fr;
+        }
+
+        .pulse {
+            height: 190px;
+        }
+    }
+</style>
+</head>
+
+<body>
+
+<div class="container">
+
+    <h1>Drum Timing Trainer</h1>
+    <div class="subtitle">
+        Connect an electronic drum kit and see how accurately you play against the pulse.
+    </div>
+
+    <div class="panel">
+        <div class="controls">
+
+            <div>
+                <label for="midiInput">MIDI Input</label>
+                <select id="midiInput">
+                    <option value="">No MIDI device selected</option>
+                </select>
+            </div>
+
+            <div>
+                <label for="bpm">Tempo (BPM)</label>
+                <input id="bpm" type="number" value="100" min="30" max="240">
+            </div>
+
+            <div>
+                <label for="midiNote">Drum MIDI Note</label>
+                <input id="midiNote" type="number" value="38" min="0" max="127">
+            </div>
+
+            <div>
+                <label>&nbsp;</label>
+                <button id="connectButton">
+                    Connect MIDI
+                </button>
+            </div>
+
+            <div>
+                <label>&nbsp;</label>
+                <button id="startButton">
+                    Start Trainer
+                </button>
+            </div>
+
+            <div>
+                <label>&nbsp;</label>
+                <button id="stopButton" class="stop">
+                    Stop
+                </button>
+            </div>
+
+        </div>
+
+        <div id="status" class="status">
+            MIDI not connected.
+        </div>
+    </div>
+
+    <div class="panel">
+
+        <div class="metronome">
+            <div id="beatNumber" class="beat-number">—</div>
+            <div class="beat-label">CURRENT BEAT</div>
+        </div>
+
+        <div class="pulse">
+            <div class="scale"></div>
+            <div class="center-line"></div>
+            <div id="timingDot" class="timing-dot"></div>
+
+            <div class="scale-label left">-100 ms</div>
+            <div class="scale-label center">0 ms</div>
+            <div class="scale-label right">+100 ms</div>
+        </div>
+
+        <div id="currentError" class="current-error">
+            —
+            <small>Hit the selected drum</small>
+        </div>
+
+    </div>
+
+    <div class="panel">
+
+        <div class="stats">
+
+            <div class="stat">
+                <div id="average" class="stat-value">—</div>
+                <div class="stat-label">AVERAGE</div>
+            </div>
+
+            <div class="stat">
+                <div id="consistency" class="stat-value">—</div>
+                <div class="stat-label">CONSISTENCY</div>
+            </div>
+
+            <div class="stat">
+                <div id="earlyCount" class="stat-value">0</div>
+                <div class="stat-label">EARLY</div>
+            </div>
+
+            <div class="stat">
+                <div id="lateCount" class="stat-value">0</div>
+                <div class="stat-label">LATE</div>
+            </div>
+
+        </div>
+
+    </div>
+
+    <div class="panel">
+
+        <h3>Recent Hits</h3>
+
+        <div id="hitList" class="hit-list">
+            No hits yet.
+        </div>
+
+        <br>
+
+        <button id="clearButton" class="secondary">
+            Clear Results
+        </button>
+
+    </div>
+
+</div>
+
+<script>
+"use strict";
+
+/*
+ * Drum Timing Trainer
+ *
+ * Everything happens locally in the browser.
+ *
+ * Main timing flow:
+ *
+ *   metronome
+ *       ↓
+ *   expected beat time
+ *       ↓
+ *   MIDI hit
+ *       ↓
+ *   timing error = hit - expected
+ */
+
+
+// ------------------------------------------------------------
+// DOM
+// ------------------------------------------------------------
+
+const midiInputSelect = document.getElementById("midiInput");
+const bpmInput = document.getElementById("bpm");
+const midiNoteInput = document.getElementById("midiNote");
+
+const connectButton = document.getElementById("connectButton");
+const startButton = document.getElementById("startButton");
+const stopButton = document.getElementById("stopButton");
+const clearButton = document.getElementById("clearButton");
+
+const statusElement = document.getElementById("status");
+const beatNumberElement = document.getElementById("beatNumber");
+
+const timingDot = document.getElementById("timingDot");
+const currentErrorElement = document.getElementById("currentError");
+
+const averageElement = document.getElementById("average");
+const consistencyElement = document.getElementById("consistency");
+const earlyCountElement = document.getElementById("earlyCount");
+const lateCountElement = document.getElementById("lateCount");
+
+const hitListElement = document.getElementById("hitList");
+
+
+// ------------------------------------------------------------
+// State
+// ------------------------------------------------------------
+
+let midiAccess = null;
+let selectedInput = null;
+
+let audioContext = null;
+
+let running = false;
+
+let bpm = 100;
+let beatDuration = 600; // milliseconds
+
+let nextBeatTime = 0;
+let beatCounter = 0;
+
+let schedulerTimer = null;
+
+let hits = [];
+
+
+// How far from the beat we search for a matching hit.
+//
+// A hit more than this many milliseconds away from the expected
+// beat is not considered a hit for that beat.
+const MAX_HIT_WINDOW = 250;
+
+
+// How close counts as "on time".
+const ON_TIME_THRESHOLD = 20;
+
+
+// ------------------------------------------------------------
+// MIDI
+// ------------------------------------------------------------
+
+async function connectMIDI() {
+
+    if (!navigator.requestMIDIAccess) {
+
+        statusElement.textContent =
+            "Web MIDI is not supported by this browser. Try Chrome or Edge on desktop.";
+
+        return;
+    }
+
+    try {
+
+        midiAccess = await navigator.requestMIDIAccess();
+
+        populateMIDIInputs();
+
+        midiAccess.onstatechange = populateMIDIInputs;
+
+        statusElement.textContent =
+            "MIDI connected. Select your drum module.";
+
+        statusElement.classList.add("connected");
+
+    } catch (error) {
+
+        console.error(error);
+
+        statusElement.textContent =
+            "Could not access MIDI. Check browser permissions and your USB connection.";
+    }
+}
+
+
+function populateMIDIInputs() {
+
+    const currentValue = midiInputSelect.value;
+
+    midiInputSelect.innerHTML =
+        '<option value="">No MIDI device selected</option>';
+
+    for (const input of midiAccess.inputs.values()) {
+
+        const option = document.createElement("option");
+
+        option.value = input.id;
+        option.textContent = input.name || "Unnamed MIDI device";
+
+        midiInputSelect.appendChild(option);
+    }
+
+    if (currentValue) {
+        midiInputSelect.value = currentValue;
+    }
+}
+
+
+function selectMIDIInput() {
+
+    if (!midiAccess) {
+        return;
+    }
+
+    if (selectedInput) {
+        selectedInput.onmidimessage = null;
+    }
+
+    const id = midiInputSelect.value;
+
+    selectedInput = null;
+
+    if (!id) {
+        statusElement.textContent = "No MIDI device selected.";
+        return;
+    }
+
+    selectedInput = midiAccess.inputs.get(id);
+
+    if (!selectedInput) {
+        statusElement.textContent = "MIDI device disappeared.";
+        return;
+    }
+
+    selectedInput.onmidimessage = handleMIDIMessage;
+
+    statusElement.textContent =
+        `Listening to ${selectedInput.name || "MIDI device"}.`;
+
+    statusElement.classList.add("connected");
+}
+
+
+function handleMIDIMessage(event) {
+
+    const data = event.data;
+
+    const status = data[0];
+    const note = data[1];
+    const velocity = data[2];
+
+    // MIDI Note On
+    //
+    // 0x90 through 0x9F = Note On on channels 1-16.
+    //
+    // Some devices send Note On with velocity 0 instead of Note Off,
+    // so require velocity > 0.
+    const command = status & 0xf0;
+
+    if (command !== 0x90 || velocity === 0) {
+        return;
+    }
+
+    const selectedNote = Number(midiNoteInput.value);
+
+    if (note !== selectedNote) {
+        return;
+    }
+
+    if (!running) {
+        return;
+    }
+
+    registerDrumHit(event, velocity);
+}
+
+
+// ------------------------------------------------------------
+// Timing
+// ------------------------------------------------------------
+
+function getMIDIEventTime(event) {
+
+    /*
+     * Web MIDI provides receivedTime as a high-resolution timestamp.
+
+     * It is preferable to Date.now() for this kind of application.
+     *
+     * Some browser implementations may not expose it consistently,
+     * so fall back to performance.now().
+     */
+
+    if (
+        typeof event.receivedTime === "number" &&
+        Number.isFinite(event.receivedTime)
+    ) {
+        return event.receivedTime;
+    }
+
+    return performance.now();
+}
+
+
+function registerDrumHit(event, velocity) {
+
+    const hitTime = getMIDIEventTime(event);
+
+    /*
+     * Find the expected beat closest to the hit.
+     *
+     * Since the player can hit slightly before or after the beat,
+     * we calculate the beat number mathematically.
+     */
+
+    const relativeTime = hitTime - trainerStartTime;
+
+    const nearestBeat =
+        Math.round(relativeTime / beatDuration);
+
+    const expectedTime =
+        trainerStartTime + nearestBeat * beatDuration;
+
+    const error =
+        hitTime - expectedTime;
+
+    if (Math.abs(error) > MAX_HIT_WINDOW) {
+        return;
+    }
+
+    /*
+     * Prevent one physical hit from being assigned multiple times.
+     */
+    if (hits.some(hit => hit.beat === nearestBeat)) {
+        return;
+    }
+
+    const hit = {
+        beat: nearestBeat,
+        actualTime: hitTime,
+        expectedTime,
+        error,
+        velocity
+    };
+
+    hits.push(hit);
+
+    updateTimingDisplay(error);
+    updateStatistics();
+    updateHitList();
+
+    flashBeat();
+}
+
+
+// ------------------------------------------------------------
+// Metronome
+// ------------------------------------------------------------
+
+let trainerStartTime = 0;
+
+
+function startTrainer() {
+
+    if (!selectedInput) {
+
+        statusElement.textContent =
+            "Select a MIDI input first.";
+
+        return;
+    }
+
+    bpm = clamp(
+        Number(bpmInput.value),
+        30,
+        240
+    );
+
+    bpmInput.value = bpm;
+
+    beatDuration = 60000 / bpm;
+
+    initializeAudio();
+
+    running = true;
+
+    hits = [];
+
+    beatCounter = 0;
+
+    /*
+     * Give the user a short count-in.
+     *
+     * The first beat is 1 second from now.
+     */
+
+    trainerStartTime = performance.now() + 1000;
+
+    nextBeatTime = trainerStartTime;
+
+    statusElement.textContent =
+        `Running at ${bpm} BPM. Play the selected drum on every click.`;
+
+    startScheduler();
+}
+
+
+function stopTrainer() {
+
+    running = false;
+
+    if (schedulerTimer) {
+        clearTimeout(schedulerTimer);
+        schedulerTimer = null;
+    }
+
+    beatNumberElement.textContent = "—";
+
+    statusElement.textContent =
+        "Trainer stopped.";
+}
+
+
+function startScheduler() {
+
+    if (schedulerTimer) {
+        clearTimeout(schedulerTimer);
+    }
+
+    scheduler();
+
+}
+
+
+function scheduler() {
+
+    if (!running) {
+        return;
+    }
+
+    const now = performance.now();
+
+    /*
+     * Schedule beats that are due.
+     *
+     * The small look-ahead makes the metronome more stable than
+     * simply using setInterval().
+     */
+
+    while (nextBeatTime < now + 100) {
+
+        scheduleBeat(nextBeatTime);
+
+        nextBeatTime += beatDuration;
+    }
+
+    schedulerTimer = setTimeout(
+        scheduler,
+        20
+    );
+}
+
+
+function scheduleBeat(time) {
+
+    const beat = beatCounter + 1;
+
+    beatCounter++;
+
+    /*
+     * Audio scheduling
+     */
+
+    const audioTime =
+        audioContext.currentTime +
+        Math.max(0, (time - performance.now()) / 1000);
+
+    playClick(audioTime, beat);
+
+
+    /*
+     * Visual scheduling
+     */
+
+    const delay =
+        Math.max(0, time - performance.now());
+
+    setTimeout(() => {
+
+        if (!running) {
+            return;
+        }
+
+        beatNumberElement.textContent =
+            ((beat - 1) % 4) + 1;
+
+        flashMetronome();
+
+    }, delay);
+}
+
+
+// ------------------------------------------------------------
+// Audio
+// ------------------------------------------------------------
+
+function initializeAudio() {
+
+    if (!audioContext) {
+
+        audioContext =
+            new (window.AudioContext ||
+                 window.webkitAudioContext)();
+    }
+
+    if (audioContext.state === "suspended") {
+        audioContext.resume();
+    }
+}
+
+
+function playClick(time, beat) {
+
+    const oscillator =
+        audioContext.createOscillator();
+
+    const gain =
+        audioContext.createGain();
+
+    oscillator.connect(gain);
+    gain.connect(audioContext.destination);
+
+    /*
+     * Accent beat 1.
+     */
+
+    oscillator.frequency.value =
+        beat % 4 === 1
+            ? 1200
+            : 800;
+
+    gain.gain.setValueAtTime(
+        0.0001,
+        time
+    );
+
+    gain.gain.exponentialRampToValueAtTime(
+        beat % 4 === 1 ? 0.35 : 0.20,
+        time + 0.002
+    );
+
+    gain.gain.exponentialRampToValueAtTime(
+        0.0001,
+        time + 0.045
+    );
+
+    oscillator.start(time);
+    oscillator.stop(time + 0.05);
+}
+
+
+// ------------------------------------------------------------
+// Visual feedback
+// ------------------------------------------------------------
+
+function flashMetronome() {
+
+    beatNumberElement.style.color = "#5eead4";
+
+    setTimeout(() => {
+
+        beatNumberElement.style.color = "";
+
+    }, 80);
+}
+
+
+function flashBeat() {
+
+    timingDot.style.background = "#ffffff";
+
+    setTimeout(() => {
+
+        timingDot.style.background = "";
+
+    }, 80);
+}
+
+
+function updateTimingDisplay(error) {
+
+    const rounded =
+        Math.round(error);
+
+    let text;
+
+    if (Math.abs(rounded) <= ON_TIME_THRESHOLD) {
+
+        text = `${formatSigned(rounded)} ms`;
+
+        currentErrorElement.className =
+            "current-error on-time";
+
+    } else if (rounded < 0) {
+
+        text = `${formatSigned(rounded)} ms EARLY`;
+
+        currentErrorElement.className =
+            "current-error early";
+
+    } else {
+
+        text = `+${rounded} ms LATE`;
+
+        currentErrorElement.className =
+            "current-error late";
+    }
+
+    currentErrorElement.innerHTML =
+        `${text}<small>timing deviation</small>`;
+
+
+    /*
+     * Position dot on the visual scale.
+     *
+     * -100 ms = left
+     *    0 ms = center
+     * +100 ms = right
+     */
+
+    const clamped =
+        Math.max(-100, Math.min(100, error));
+
+    const percentage =
+        50 + clamped / 2;
+
+    timingDot.style.left =
+        `${percentage}%`;
+}
+
+
+// ------------------------------------------------------------
+// Statistics
+// ------------------------------------------------------------
+
+function updateStatistics() {
+
+    if (hits.length === 0) {
+        return;
+    }
+
+    const errors =
+        hits.map(hit => hit.error);
+
+    const mean =
+        errors.reduce(
+            (sum, value) => sum + value,
+            0
+        ) / errors.length;
+
+
+    /*
+     * Standard deviation measures consistency.
+     */
+
+    const variance =
+        errors.reduce(
+            (sum, value) =>
+                sum + Math.pow(value - mean, 2),
+            0
+        ) / errors.length;
+
+    const standardDeviation =
+        Math.sqrt(variance);
+
+    const early =
+        errors.filter(
+            error => error < -ON_TIME_THRESHOLD
+        ).length;
+
+    const late =
+        errors.filter(
+            error => error > ON_TIME_THRESHOLD
+        ).length;
+
+
+    averageElement.textContent =
+        `${formatSigned(mean)} ms`;
+
+    consistencyElement.textContent =
+        `±${Math.round(standardDeviation)} ms`;
+
+    earlyCountElement.textContent =
+        early;
+
+    lateCountElement.textContent =
+        late;
+}
+
+
+// ------------------------------------------------------------
+// Hit history
+// ------------------------------------------------------------
+
+function updateHitList() {
+
+    if (hits.length === 0) {
+
+        hitListElement.textContent =
+            "No hits yet.";
+
+        return;
+    }
+
+    /*
+     * Show newest first.
+     */
+
+    const recent =
+        [...hits]
+            .slice(-30)
+            .reverse();
+
+    hitListElement.innerHTML = "";
+
+    for (const hit of recent) {
+
+        const row =
+            document.createElement("div");
+
+        row.className = "hit";
+
+        let className;
+
+        if (Math.abs(hit.error) <= ON_TIME_THRESHOLD) {
+            className = "on-time";
+        } else if (hit.error < 0) {
+            className = "early";
+        } else {
+            className = "late";
+        }
+
+        const label =
+            hit.error < 0
+                ? `${Math.round(hit.error)} ms early`
+                : `${Math.round(hit.error)} ms late`;
+
+        row.innerHTML = `
+            <span>Beat ${hit.beat}</span>
+            <span class="${className}">
+                ${label}
+            </span>
+        `;
+
+        hitListElement.appendChild(row);
+    }
+}
+
+
+// ------------------------------------------------------------
+// Utilities
+// ------------------------------------------------------------
+
+function formatSigned(value) {
+
+    const rounded =
+        Math.round(value);
+
+    if (rounded > 0) {
+        return `+${rounded}`;
+    }
+
+    return `${rounded}`;
+}
+
+
+function clamp(value, min, max) {
+
+    return Math.min(
+        max,
+        Math.max(min, value)
+    );
+}
+
+
+// ------------------------------------------------------------
+// Clear
+// ------------------------------------------------------------
+
+function clearResults() {
+
+    hits = [];
+
+    averageElement.textContent = "—";
+    consistencyElement.textContent = "—";
+    earlyCountElement.textContent = "0";
+    lateCountElement.textContent = "0";
+
+    currentErrorElement.innerHTML =
+        `—<small>Hit the selected drum</small>`;
+
+    timingDot.style.left = "50%";
+
+    updateHitList();
+}
+
+
+// ------------------------------------------------------------
+// Event handlers
+// ------------------------------------------------------------
+
+connectButton.addEventListener(
+    "click",
+    connectMIDI
+);
+
+midiInputSelect.addEventListener(
+    "change",
+    selectMIDIInput
+);
+
+startButton.addEventListener(
+    "click",
+    startTrainer
+);
+
+stopButton.addEventListener(
+    "click",
+    stopTrainer
+);
+
+clearButton.addEventListener(
+    "click",
+    clearResults
+);
+
+</script>
+
+</body>
+</html>

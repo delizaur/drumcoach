@@ -297,6 +297,19 @@
                 <label for="midiNote">Drum MIDI Note</label>
                 <input id="midiNote" type="number" value="38" min="0" max="127">
             </div>
+            <div>
+                <label for="latencyOffset">
+                    Latency Offset (ms)
+                </label>
+                <input
+                    id="latencyOffset"
+                    type="number"
+                    value="0"
+                    min="-200"
+                    max="200"
+                    step="1"
+                >
+            </div>
 
             <div>
                 <label>&nbsp;</label>
@@ -441,6 +454,7 @@ const earlyCountElement = document.getElementById("earlyCount");
 const lateCountElement = document.getElementById("lateCount");
 
 const hitListElement = document.getElementById("hitList");
+const latencyOffsetInput = document.getElementById("latencyOffset");
 
 
 // ------------------------------------------------------------
@@ -633,25 +647,22 @@ function getMIDIEventTime(event) {
 
 function registerDrumHit(event, velocity) {
 
-    const hitTime = getMIDIEventTime(event);
-
+    const rawHitTime = getMIDIEventTime(event);
+    const latencyOffset = Number(latencyOffsetInput.value) || 0;
+    
     /*
-     * Find the expected beat closest to the hit.
+     * Positive latency offset means:
      *
-     * Since the player can hit slightly before or after the beat,
-     * we calculate the beat number mathematically.
+     * "The MIDI event arrives this many milliseconds
+     * after the physical hit."
+     *
+     * Therefore move the observed hit backwards.
      */
-
-    const relativeTime = hitTime - trainerStartTime;
-
-    const nearestBeat =
-        Math.round(relativeTime / beatDuration);
-
-    const expectedTime =
-        trainerStartTime + nearestBeat * beatDuration;
-
-    const error =
-        hitTime - expectedTime;
+    const correctedHitTime = rawHitTime - latencyOffset;
+    const relativeTime = correctedHitTime - trainerStartTime;
+    const nearestBeat = Math.round(relativeTime / beatDuration);
+    const expectedTime = trainerStartTime + nearestBeat * beatDuration;
+    const error = correctedHitTime - expectedTime;
 
     if (Math.abs(error) > MAX_HIT_WINDOW) {
         return;

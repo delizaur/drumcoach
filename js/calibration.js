@@ -1,7 +1,8 @@
 // Latency calibration: play along to a click and measure the average offset of the hits.
 import { median, meanSd } from './util.js';
 
-const BEAT_MS = 600;   // 100 BPM
+const BPM = 140;
+const BEAT_MS = 60000 / BPM;
 const COUNT_IN = 4;
 const TARGET_HITS = 30;
 const TOTAL_CLICKS = COUNT_IN + TARGET_HITS + 6;

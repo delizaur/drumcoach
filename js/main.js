@@ -2,7 +2,7 @@ import { AudioEngine } from './audio.js';
 import { MidiInput, drumName, padOf, LANES } from './midi.js';
 import { readZip } from './zip.js';
 import { loadBeatmapSet, songKey, tempoSummary } from './osu.js';
-import { decoderOffsetMs } from './mp3.js';
+import { analyzeSync, SYNC_VERSION } from './beatsync.js';
 import { PATTERNS, makePattern, songSections, metronomeSections, buildGrid, sectionAt } from './timing.js';
 import { Scorer, STRICTNESS, JUDGMENTS, MISS } from './scorer.js';
 import { Timeline, ErrorMeter, Scatter, Histogram, drawCalibStrip } from './render.js';
@@ -30,6 +30,7 @@ const DEFAULTS = {
   clickMode: 'beats', clickVolume: 0.7, strictness: 'normal',
   // song
   rate: 1, musicVolume: 0.85, songClick: false, lastSong: null, songPrefs: {},
+  autoSync: true, syncFineTune: 0, syncMigrated: false,
 };
 
 const settings = (() => {
@@ -45,6 +46,16 @@ const settings = (() => {
 function save() {
   try { localStorage.setItem(SETTINGS_KEY, JSON.stringify(settings)); } catch { /* storage unavailable */ }
 }
+
+// Per-song offsets saved before auto-sync existed were compensating for what auto-sync now fixes.
+if (!settings.syncMigrated) {
+  for (const p of Object.values(settings.songPrefs)) p.offset = 0;
+  settings.syncMigrated = true;
+  save();
+}
+
+// Used when a song's beat can't be detected: the typical offset measured across osu! maps.
+const FALLBACK_SYNC = 22;
 
 function songPrefs() {
   if (!song) return { offset: 0, diff: 0, startAt: 0 };
@@ -174,7 +185,12 @@ async function startSession() {
     rate = settings.rate;
     buffer = song.buffer;
     endMs = song.durationMs;
-    sections = songSections(song.diff.timing, endMs, prefs.offset + song.decoderOffset);
+    if (settings.autoSync && !song.sync) {
+      $('startBtn').textContent = 'Analyzing…';
+      await song.syncReady;
+      $('startBtn').textContent = 'Start';
+    }
+    sections = songSections(song.diff.timing, endMs, totalSync());
     if (!sections.length) return showSongError('This difficulty has no timing points inside the audio.');
     startPos = clamp(prefs.startAt, 0, Math.max(0, endMs - 3000));
     const sec = sections[sectionAt(sections, startPos)];
@@ -515,9 +531,10 @@ async function loadSong(list, { fromLibrary = false } = {}) {
   $('dropZone').querySelector('strong').textContent = 'Loading…';
   try {
     const { diffs, keep } = await readSongSet(asItems(list));
-    const next = { key: songKey(diffs[0]), diffs, diff: null, diffIndex: -1, buffer: null, audioName: null, durationMs: 0, decoderOffset: 0, bgName: null, bgUrl: null };
+    const next = { key: songKey(diffs[0]), diffs, diff: null, diffIndex: -1, buffer: null, audioName: null, durationMs: 0, bgName: null, bgUrl: null, sync: null, syncReady: null };
     const prefs = settings.songPrefs[next.key];
     await selectDifficulty(next, prefs && prefs.diff < diffs.length ? prefs.diff : 0);
+    startSync(next);
     if (song?.bgUrl) URL.revokeObjectURL(song.bgUrl);
     song = next;
     songPrefs().diff = song.diffIndex;
@@ -541,11 +558,8 @@ async function loadSong(list, { fromLibrary = false } = {}) {
 async function selectDifficulty(target, index) {
   const d = target.diffs[index];
   if (target.audioName !== d.audioEntry.name) {
-    const bytes = await d.audioEntry.bytes();
-    target.buffer = await audio.decode(bytes);
+    target.buffer = await audio.decode(await d.audioEntry.bytes());
     target.audioName = d.audioEntry.name;
-    // match osu!'s MP3 decoder so the map's timing lines up with the audio
-    target.decoderOffset = /\.mp3$/i.test(d.audioEntry.name) ? decoderOffsetMs(bytes, target.buffer.duration) : 0;
     target.durationMs = target.buffer.duration * 1000;
   }
   const bgName = d.bgEntry?.name || null;
@@ -606,6 +620,51 @@ async function droppedItems(dataTransfer) {
   return out;
 }
 
+/** Starts (or reuses the cached) beat-sync analysis for a song's current difficulty. */
+function startSync(target) {
+  const prefs = (settings.songPrefs[target.key] ||= { offset: 0, diff: 0, startAt: 0 });
+  const cache = (prefs.sync ||= {});
+  const key = target.diff.version;
+  const cached = cache[key];
+  if (cached?.v === SYNC_VERSION) {
+    target.sync = cached;
+    target.syncReady = Promise.resolve(cached);
+    return;
+  }
+  target.sync = null;
+  const done = rec => {
+    target.sync = rec;
+    if (song === target) renderSongInfo();
+    return rec;
+  };
+  target.syncReady = analyzeSync(target.buffer, target.diff.timing)
+    .then(r => {
+      const rec = {
+        v: SYNC_VERSION, ok: r.ok, offset: r.offset,
+        confidence: Number.isFinite(r.confidence) ? +r.confidence.toFixed(2) : 99,
+        flagged: r.flagged.map(f => ({ time: f.time, bpm: f.bpm, offset: f.offset })),
+      };
+      cache[key] = rec;
+      save();
+      return done(rec);
+    })
+    .catch(err => {
+      console.warn('Beat sync analysis failed', err);
+      return done({ v: SYNC_VERSION, ok: false, offset: 0, confidence: 0, flagged: [] });
+    });
+}
+
+/** The automatic part of the sync: detected, typical fallback, or nothing when auto-sync is off. */
+function autoSync() {
+  if (!settings.autoSync || !song?.sync) return 0;
+  return song.sync.ok ? song.sync.offset : FALLBACK_SYNC;
+}
+
+/** Total shift (ms) applied to the map's beats; positive moves them later. */
+function totalSync() {
+  return autoSync() + settings.syncFineTune + songPrefs().offset;
+}
+
 async function handleItems(itemsPromise) {
   const label = $('dropZone').querySelector('strong');
   label.textContent = 'Reading files…';
@@ -652,11 +711,8 @@ function renderSongInfo() {
     t.min === t.max ? `${bpm(t.main)} BPM` : `${bpm(t.min)}–${bpm(t.max)} BPM (mostly ${bpm(t.main)})`,
     t.changes ? `${t.changes} timing change${t.changes > 1 ? 's' : ''}` : 'constant tempo',
     fmtTime(song.durationMs),
-    ...(Math.abs(song.decoderOffset) >= 0.5 ? [`MP3 sync ${fmtMs(song.decoderOffset)}`] : []),
   ].join(' · ');
-  $('songMeta').title = song.decoderOffset
-    ? "This MP3 decodes slightly differently in the browser than in osu!. The beats are shifted automatically to compensate."
-    : '';
+  renderSync();
 
   const sel = $('diffSelect');
   sel.innerHTML = song.diffs.map((x, i) => `<option value="${i}">${escapeHtml(x.version)}</option>`).join('');
@@ -669,6 +725,33 @@ function renderSongInfo() {
   $('startAtLabel').textContent = fmtTime(prefs.startAt);
   $('songOffset').value = prefs.offset;
   $('songOffsetLabel').textContent = fmtMs(prefs.offset);
+}
+
+function renderSync() {
+  const el = $('songSync');
+  const sync = song?.sync;
+  let main, cls = '';
+  if (!settings.autoSync) {
+    main = 'Auto-sync is off, so the map\'s own timing is used.';
+  } else if (!sync) {
+    main = 'Analyzing the beat…';
+    cls = 'pending';
+  } else if (sync.ok) {
+    const quality = sync.confidence >= 3 ? 'clear match' : 'fair match';
+    main = `Auto-sync <b>${fmtMs(sync.offset, 1)}</b> <span class="hint">(${quality} with the drums)</span>`;
+  } else {
+    main = `Couldn't detect the beat clearly, so the typical <b>${fmtMs(FALLBACK_SYNC)}</b> is used. Adjust by ear if needed.`;
+    cls = 'warn';
+  }
+  const flags = (settings.autoSync && sync?.ok ? sync.flagged : []).map(f => {
+    const d = f.offset - sync.offset;
+    return `<li>Section at ${fmtTime(f.time)} (${+f.bpm.toFixed(1)} BPM): the map's beats seem ${Math.abs(d).toFixed(0)} ms ${d > 0 ? 'early' : 'late'} here compared to the rest of the song.</li>`;
+  });
+  const total = fmtMs(totalSync(), 1);
+  el.className = `song-sync ${cls}`;
+  el.innerHTML = `<div>${main}</div>`
+    + (flags.length ? `<ul class="sync-flags">${flags.join('')}</ul>` : '')
+    + `<div class="hint">Total shift applied to the beats: ${total}</div>`;
 }
 
 async function renderLibrary() {
@@ -722,6 +805,7 @@ window.addEventListener('drop', e => {
 $('diffSelect').onchange = async e => {
   try {
     await selectDifficulty(song, Number(e.target.value));
+    startSync(song);
     songPrefs().diff = song.diffIndex;
   } catch (err) { showSongError(err.message); }
   save();
@@ -735,6 +819,7 @@ $('startAt').oninput = e => {
 $('songOffset').oninput = e => {
   songPrefs().offset = Number(e.target.value);
   $('songOffsetLabel').textContent = fmtMs(songPrefs().offset);
+  renderSync();
   save();
 };
 
@@ -922,6 +1007,16 @@ bind('minVelocity', 'minVelocity', { after: v => { $('minVelocityLabel').textCon
 $('minVelocityLabel').textContent = settings.minVelocity;
 bind('keyboardOn', 'keyboard', { event: 'change' });
 bind('padSounds', 'padSounds', { event: 'change' });
+bind('autoSyncOn', 'autoSync', { event: 'change', after: () => { if (song?.diff) renderSync(); } });
+function setFineTune(v) {
+  settings.syncFineTune = clamp(Math.round(v), -60, 60);
+  $('syncFineTune').value = settings.syncFineTune;
+  $('syncFineTuneLabel').textContent = fmtMs(settings.syncFineTune);
+  save();
+  if (song?.diff) renderSync();
+}
+setFineTune(settings.syncFineTune);
+$('syncFineTune').addEventListener('input', e => setFineTune(Number(e.target.value)));
 function setPadVolume(v) {
   settings.padVolume = clamp(v, 0, 1);
   save();

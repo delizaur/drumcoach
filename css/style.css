@@ -156,6 +156,11 @@ input[type=range] { width: 100%; accent-color: var(--accent); margin: 6px 0 2px;
 .song-text { position: relative; padding: 14px; }
 .song-title { font-size: 17px; font-weight: 700; line-height: 1.25; }
 .song-artist { color: #c9cfdb; font-size: 14px; }
+.song-sync { font-size: 13px; background: var(--panel-2); border: 1px solid var(--border); border-radius: var(--radius-sm); padding: 8px 10px; margin: 0 0 12px; }
+.song-sync.pending { color: var(--muted); }
+.song-sync.warn { border-color: rgba(255, 154, 77, .5); }
+.song-sync .hint { font-size: 12px; }
+.sync-flags { margin: 6px 0 4px; padding-left: 18px; color: var(--off); font-size: 12.5px; }
 .song-meta { color: var(--muted); font-size: 12.5px; margin-top: 6px; font-family: var(--mono); }
 
 .library h3 { margin-top: 20px; }

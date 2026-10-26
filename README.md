@@ -42,7 +42,7 @@ Web MIDI works in Chrome, Edge and Opera (desktop and Android). Firefox supports
 - The `AudioContext` is the master clock. Music and clicks are scheduled on it with sample accuracy.
 - MIDI and keyboard events carry `performance.now()` timestamps. `AudioContext.getOutputTimestamp()` maps those onto the audio timeline *as it is heard*, which corrects for the output latency the browser reports. The mapping is median-filtered every frame to remove jitter.
 - Whatever latency is left (USB polling, the kit's own processing, Bluetooth, the browser under-reporting) is covered by the **latency compensation** value, which you measure with the calibration.
-- **MP3 sync with osu!:** osu! decodes audio with BASS, which always skips the MP3 decoder delay (529 samples) and the encoder delay. Browsers only do that when the file has LAME gapless info, so files without it would play 12–25 ms late against the map. `js/mp3.js` counts the MP3 frames, works out from the decoded length what the browser trimmed, and shifts the map by the difference. Tested against BASS output on 40 real beatmaps: 39 match to the sample.
+- **Auto-sync:** osu! maps often put their beats a little ahead of the music (around 20-25 ms on average across 56 maps measured, with per-map variation). When a song loads, `js/beatsync.js` finds the drums in the audio (kick band below 150 Hz, snare/cymbal band above 2.5 kHz, onset strength at 1 ms resolution) and picks the shift of the map's beat grid (within ±60 ms) that lines up best with them, averaged over every beat in the song. Sections with 32+ beats are also checked on their own and flagged if they disagree with the rest by 10 ms or more. Songs without clear percussion fall back to a typical +22 ms. On top of that come a global fine-tune (Settings) and a per-song adjustment. Results are cached per difficulty.
 - **The rhythm is a quantization grid.** Each stroke snaps to the nearest grid note and is judged by its distance to it. A stroke more than the *good* window away (60 ms at Normal) counts as a miss. Grid notes you don't play aren't counted at all, so an 8th-note grid lets you play quarters, 8ths or any mix of them. **Hybrid grids** snap a stroke to the nearest coarse note (an 8th) whenever it is within the good window, or 65% of the gap to the neighbouring fine note if that is smaller, and only fall back to the fine notes (16ths) otherwise. On a plain 16th grid, a loose 8th more than half a 16th off gets snapped to the wrong note and judged with the wrong sign, which shows up as two peaks in the distribution; the hybrid grid avoids most of that. Off-grid misses lower your accuracy but are left out of the average offset and σ. Strokes on different pads are scored separately, so kick + snare or snare + hi-hat on the same note are two hits. On the same pad, strokes within 35 ms count as one (to filter double triggers), and a second stroke on a grid note that pad already played counts as *doubled*.
 
 ## Project layout
@@ -56,7 +56,7 @@ js/midi.js        Web MIDI input
 js/drums.js       synthesized drum kit for pad sounds
 js/zip.js         minimal .osz (zip) reader using DecompressionStream
 js/osu.js         .osu parsing (metadata, red-line timing points)
-js/mp3.js         MP3 frame/LAME-tag parsing for decoder-delay compensation
+js/beatsync.js    automatic beat-grid alignment from the audio
 js/timing.js      tempo sections, rhythm patterns, expected-note grid
 js/scorer.js      hit matching, judgments, statistics
 js/render.js      canvas views (timeline, error meter, charts)

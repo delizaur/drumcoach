@@ -110,9 +110,10 @@
             <small>Slowing down also lowers the pitch.</small>
           </div>
           <div class="field">
-            <label for="songOffset">Song offset <output id="songOffsetLabel">0 ms</output></label>
+            <div class="song-sync" id="songSync"></div>
+            <label for="songOffset">Your adjustment for this song <output id="songOffsetLabel">0 ms</output></label>
             <input id="songOffset" type="range" min="-120" max="120" step="1">
-            <small>Saved for each song. Use it if this one map's beats feel early or late (+ moves the beats later).</small>
+            <small>Added on top of the auto-sync and saved per song. Use it if this map's beats still feel early or late (+ moves the beats later).</small>
           </div>
           <div class="field">
             <label for="musicVolume">Music volume</label>
@@ -259,6 +260,14 @@
         <label for="padVolume">Drum sound volume</label>
         <input id="padVolume" type="range" min="0" max="1" step="0.01">
         <small>The sounds are synthesized in the browser, so you hear them a little later than your kit's own sound module (USB plus audio output latency). If you monitor through the module, turn this off.</small>
+      </div>
+
+      <h3>Song sync</h3>
+      <label class="switch"><input type="checkbox" id="autoSyncOn"><span class="track"></span>Auto-sync songs to their drums</label>
+      <div class="field">
+        <label for="syncFineTune">Fine-tune for all songs <output id="syncFineTuneLabel"></output></label>
+        <input id="syncFineTune" type="range" min="-60" max="60" step="1">
+        <small>Many osu! maps put their beats slightly ahead of the music. Auto-sync measures that for each song from its drums. If songs still feel consistently early or late to you, adjust this once (+ moves the beats later).</small>
       </div>
 
       <h3>Latency</h3>

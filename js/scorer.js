@@ -3,7 +3,8 @@
 // The selected rhythm is a grid of allowed positions, not a part the player has to play in full:
 // every stroke snaps to the nearest grid note and is judged by its distance to it. Strokes too far
 // from the grid are misses. Grid notes nobody plays are simply skipped, so an 8th-note grid also
-// covers quarters, or any mix of the two.
+// covers quarters, or any mix of the two. Strokes on different pads are scored independently, so
+// kick + snare on the same grid note are two hits.
 //
 // All times are song milliseconds; errors are reported in real milliseconds (adjusted for playback rate).
 import { lowerBound, meanSd } from './util.js';
@@ -19,7 +20,7 @@ export const MISS = 3;
 const WEIGHT = [1, 0.75, 0.45, 0];
 
 const MAX_WINDOW = 150;  // strokes further than this past the first/last grid note are ignored
-const CHORD_WINDOW = 35; // strokes this close together count as one (kick + crash, flams)
+const DOUBLE_TRIGGER = 35; // strokes on the same pad this close together count as one
 
 export class Scorer {
   constructor(notes, { windows, rate = 1, scoreFrom = -Infinity }) {
@@ -27,17 +28,18 @@ export class Scorer {
     this.windows = windows;
     this.rate = rate;
     this.first = lowerBound(notes, scoreFrom);
-    this.judge = new Int8Array(notes.length).fill(-1); // judgment of the stroke that claimed each grid note
-    this.hits = [];     // strokes on the grid: { t, err, j, i, slot, sec }
-    this.misses = [];   // strokes too far off the grid: { t, err, i }
-    this.extras = [];   // second strokes on an already-played grid note: { t }
+    this.judge = new Int8Array(notes.length).fill(-1); // best judgment among the strokes on each grid note
+    this.claimed = new Set(); // "noteIndex|pad" pairs already played
+    this.hits = [];     // strokes on the grid: { t, err, j, i, slot, sec, pad, lane }
+    this.misses = [];   // strokes too far off the grid: same shape
+    this.extras = [];   // same pad striking an already-played grid note again: { t, pad, lane }
     this.counts = [0, 0, 0, 0];
     this.streak = 0;
     this.maxStreak = 0;
     this.sum = 0;
     this.sumSq = 0;
     this.weight = 0;
-    this.lastStroke = -Infinity;
+    this.lastStroke = new Map(); // pad → time of its last stroke
   }
 
   classify(errMs) {
@@ -46,12 +48,13 @@ export class Scorer {
   }
 
   /**
-   * Registers a stroke at song time t.
-   * @returns {null | {type: 'chord'|'extra'|'hit'|'miss', hit?: object}}
+   * Registers a stroke at song time t on a pad (see padOf in midi.js).
+   * @returns {null | {type: 'double'|'extra'|'hit'|'miss', hit?: object}}
    */
-  hit(t) {
-    if (Math.abs(t - this.lastStroke) < CHORD_WINDOW * this.rate) return { type: 'chord' };
-    this.lastStroke = t;
+  hit(t, pad = 'pad', lane = 3) {
+    const last = this.lastStroke.get(pad);
+    if (last !== undefined && Math.abs(t - last) < DOUBLE_TRIGGER * this.rate) return { type: 'double' };
+    this.lastStroke.set(pad, t);
 
     const n = this.notes;
     if (this.first >= n.length) return null;
@@ -72,23 +75,25 @@ export class Scorer {
     if (j === MISS) {
       this.counts[MISS]++;
       this.streak = 0;
-      const miss = { t, err, j, i, slot: n[i].slot, sec: n[i].sec };
+      const miss = { t, err, j, i, slot: n[i].slot, sec: n[i].sec, pad, lane };
       this.misses.push(miss);
       return { type: 'miss', hit: miss };
     }
-    if (this.judge[i] !== -1) {
-      this.extras.push({ t });
+    const key = `${i}|${pad}`;
+    if (this.claimed.has(key)) {
+      this.extras.push({ t, pad, lane });
       return { type: 'extra' };
     }
 
-    this.judge[i] = j;
+    this.claimed.add(key);
+    if (this.judge[i] === -1 || j < this.judge[i]) this.judge[i] = j;
     this.counts[j]++;
     this.sum += err;
     this.sumSq += err * err;
     this.weight += WEIGHT[j];
     this.streak++;
     this.maxStreak = Math.max(this.maxStreak, this.streak);
-    const hit = { t, err, j, i, slot: n[i].slot, sec: n[i].sec };
+    const hit = { t, err, j, i, slot: n[i].slot, sec: n[i].sec, pad, lane };
     this.hits.push(hit);
     return { type: 'hit', hit };
   }
@@ -112,15 +117,15 @@ export class Scorer {
     return h.length ? h.reduce((a, x) => a + x.err, 0) / h.length : 0;
   }
 
-  /** Per-key breakdown of strokes. keyFn receives the grid note index and returns a group key. */
+  /** Per-key breakdown of strokes. keyFn receives a stroke ({ i, lane, ... }) and returns a group key. */
   groupBy(keyFn) {
     const groups = new Map();
     const get = k => {
       if (!groups.has(k)) groups.set(k, { key: k, errs: [], misses: 0 });
       return groups.get(k);
     };
-    for (const h of this.hits) get(keyFn(h.i)).errs.push(h.err);
-    for (const m of this.misses) get(keyFn(m.i)).misses++;
+    for (const h of this.hits) get(keyFn(h)).errs.push(h.err);
+    for (const m of this.misses) get(keyFn(m)).misses++;
     return [...groups.values()].map(g => ({ ...g, ...meanSd(g.errs) }));
   }
 }

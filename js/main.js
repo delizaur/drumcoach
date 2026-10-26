@@ -1,5 +1,5 @@
 import { AudioEngine } from './audio.js';
-import { MidiInput, drumName } from './midi.js';
+import { MidiInput, drumName, padOf, LANES } from './midi.js';
 import { readZip } from './zip.js';
 import { loadBeatmapSet, songKey, tempoSummary } from './osu.js';
 import { decoderOffsetMs } from './mp3.js';
@@ -83,7 +83,7 @@ function onMidiNote(ev) {
 
   // muted pads still sound (above), they just aren't scored
   if (ev.velocity < settings.minVelocity || settings.mutedNotes.includes(ev.note)) return;
-  stroke(ev.time);
+  stroke(ev.time, ev.note);
 }
 
 let kit = null;
@@ -99,7 +99,8 @@ for (const type of ['pointerdown', 'keydown']) {
   window.addEventListener(type, () => { audio.init().catch(() => {}); }, { once: true, capture: true });
 }
 
-const HIT_KEYS = new Set([' ', 'f', 'j', 'd', 'k']);
+// keyboard stand-ins for pads: Space = kick, F/J = snare, D/K = hi-hat
+const HIT_KEYS = { ' ': 36, f: 38, j: 38, d: 42, k: 42 };
 function isTyping(el) {
   return el && (el.tagName === 'TEXTAREA' || el.tagName === 'SELECT'
     || (el.tagName === 'INPUT' && !['range', 'checkbox', 'radio', 'button'].includes(el.type)));
@@ -107,30 +108,32 @@ function isTyping(el) {
 window.addEventListener('keydown', e => {
   if (e.key === 'Escape' && session) { e.preventDefault(); stopSession(true); return; }
   if (!settings.keyboard || e.ctrlKey || e.metaKey || e.altKey || isTyping(e.target)) return;
-  if (!HIT_KEYS.has(e.key.toLowerCase()) || !(session || calib?.active)) return;
+  const note = HIT_KEYS[e.key.toLowerCase()];
+  if (!note || !(session || calib?.active)) return;
   e.preventDefault();
   if (e.repeat) return;
-  playPad(38, 100);
-  stroke(e.timeStamp || performance.now());
+  playPad(note, 100);
+  stroke(e.timeStamp || performance.now(), note);
 });
 window.addEventListener('keyup', e => {
   if (e.key === ' ' && (session || calib?.active) && !isTyping(e.target)) e.preventDefault();
 });
 
-/** A single drum stroke at a performance.now()-domain time. */
-function stroke(perfTime) {
+/** A single drum stroke on a MIDI note at a performance.now()-domain time. */
+function stroke(perfTime, note) {
   if (!audio.ctx) return;
   const songT = audio.songTimeAtCtx(audio.perfToCtx(perfTime));
   if (calib?.active) { calib.hit(songT); return; }
   if (!session) return;
-  const res = session.scorer.hit(songT - settings.latency * session.rate);
+  const { pad, lane } = padOf(note);
+  const res = session.scorer.hit(songT - settings.latency * session.rate, pad, lane);
   if (!res) return;
   if (res.type === 'hit' || res.type === 'miss') {
     recent.push({ err: res.hit.err, j: res.hit.j, at: performance.now() });
     if (recent.length > 60) recent.shift();
     showFeedback(res.hit.j, res.hit.err);
   }
-  if (res.type !== 'chord') session.scatterDirty = true;
+  if (res.type !== 'double') session.scatterDirty = true;
 }
 
 // ================================================================ session
@@ -197,6 +200,7 @@ async function startSession() {
       ? `${song.diff.artist} – ${song.diff.title} [${song.diff.version}]`
       : `Metronome · ${settings.bpm} BPM${settings.trainerOn ? ' (speed trainer)' : ''}`,
     pattern, windows, sections, rate, startPos, endMs, scoreFrom, hiddenBar,
+    lanes: LANES,
     notes: grid.notes,
     beats: grid.beats,
     scorer: new Scorer(grid.notes, { windows, rate, scoreFrom }),
@@ -356,7 +360,7 @@ function showFeedback(j, err) {
 
 // ================================================================ results
 
-function insightsFor(st, slotRows, tempoRows) {
+function insightsFor(st, slotRows, tempoRows, laneRows) {
   if (st.nHits < 4) return ['Not enough hits to say much yet. Play a bit longer!'];
   const out = [];
   const m = st.mean, sd = st.sd;
@@ -376,6 +380,13 @@ function insightsFor(st, slotRows, tempoRows) {
     const loose = solid.reduce((a, r) => (r.sd > a.sd ? r : a));
     const tight = solid.reduce((a, r) => (r.sd < a.sd ? r : a));
     if (loose.sd - tight.sd >= 6) out.push(`<b>${escapeHtml(loose.label)}</b> is your least steady subdivision (σ ${loose.sd.toFixed(0)} ms vs ${tight.sd.toFixed(0)} ms for ${escapeHtml(tight.label)}).`);
+  }
+
+  const drums = laneRows.filter(r => r.n >= 6);
+  if (drums.length > 1) {
+    const worst = drums.reduce((a, r) => (Math.abs(r.mean - m) > Math.abs(a.mean - m) ? r : a));
+    const d = worst.mean - m;
+    if (Math.abs(d) >= 5) out.push(`Your <b>${worst.label.toLowerCase()}</b> strokes land ${Math.abs(d).toFixed(0)} ms ${d < 0 ? 'earlier' : 'later'} than the rest of the kit.`);
   }
 
   const tempos = tempoRows.filter(r => r.n >= 6);
@@ -403,10 +414,13 @@ function breakdownTable(title, rows) {
 function showResults(s) {
   const st = s.scorer.stats();
   const slotLabel = new Map(s.pattern.hits.map(h => [h.slot, h.label]));
-  const slotRows = s.scorer.groupBy(i => s.notes[i].slot)
+  const slotRows = s.scorer.groupBy(h => s.notes[h.i].slot)
     .sort((a, b) => a.key - b.key)
     .map(r => ({ ...r, label: slotLabel.get(r.key) || `slot ${r.key}` }));
-  const tempoRows = s.scorer.groupBy(i => Math.round((60000 / s.sections[s.notes[i].sec].beatLength) * s.rate * 10) / 10)
+  const laneRows = s.scorer.groupBy(h => h.lane)
+    .sort((a, b) => a.key - b.key)
+    .map(r => ({ ...r, label: LANES[r.key] }));
+  const tempoRows = s.scorer.groupBy(h => Math.round((60000 / s.sections[s.notes[h.i].sec].beatLength) * s.rate * 10) / 10)
     .sort((a, b) => a.key - b.key)
     .map(r => ({ ...r, label: `${r.key} BPM` }));
 
@@ -419,12 +433,13 @@ function showResults(s) {
       <div class="tile"><div class="tile-label">Consistency <span class="nocase">(σ)</span></div><div class="tile-value">${st.nHits > 1 ? st.sd.toFixed(1) : '—'}<small>ms</small></div><div class="tile-sub">UR ${st.ur.toFixed(0)}</div></div>
       <div class="tile"><div class="tile-label">Strokes</div><div class="tile-value">${st.nHits}<small>/ ${st.judged} on grid</small></div><div class="tile-sub">${st.counts[MISS]} off the grid · ${st.extra} doubled · best streak ${st.maxStreak}</div></div>
     </div>
-    <div class="insights"><ul>${insightsFor(st, slotRows, tempoRows).map(t => `<li>${t}</li>`).join('')}</ul></div>
+    <div class="insights"><ul>${insightsFor(st, slotRows, tempoRows, laneRows).map(t => `<li>${t}</li>`).join('')}</ul></div>
     <div class="res-charts">
       <div><p class="cap">Timing over the session</p><canvas id="resScatter"></canvas></div>
       <div><p class="cap">Distribution (dashed line = average)</p><canvas id="resHist"></canvas></div>
     </div>
     <div class="res-tables">
+      ${laneRows.length > 1 ? breakdownTable('By drum', laneRows) : ''}
       ${slotRows.length > 1 ? breakdownTable('By subdivision', slotRows) : ''}
       ${tempoRows.length > 1 ? breakdownTable('By tempo', tempoRows) : ''}
     </div>`;

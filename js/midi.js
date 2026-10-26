@@ -9,6 +9,27 @@ const DRUM_NAMES = {
 };
 export const drumName = note => DRUM_NAMES[note] || `Note ${note}`;
 
+/** Timeline lanes, top to bottom in drum-notation order. */
+export const LANES = ['Cymbals', 'Hi-hat', 'Toms', 'Snare', 'Kick'];
+
+// note → [physical pad, lane index]. Zones of one pad (head/rim, bow/edge/bell, open/closed)
+// share a pad id, since a single pad can't be struck twice at once.
+const PADS = {
+  35: ['kick', 4], 36: ['kick', 4],
+  37: ['snare', 3], 38: ['snare', 3], 39: ['snare', 3], 40: ['snare', 3],
+  48: ['tom1', 2], 50: ['tom1', 2], 45: ['tom2', 2], 47: ['tom2', 2],
+  43: ['tom3', 2], 58: ['tom3', 2], 41: ['tom4', 2],
+  22: ['hihat', 1], 26: ['hihat', 1], 42: ['hihat', 1], 46: ['hihat', 1], 44: ['hihat-pedal', 1],
+  49: ['crash1', 0], 55: ['crash1', 0], 57: ['crash2', 0], 52: ['crash2', 0],
+  51: ['ride', 0], 53: ['ride', 0], 59: ['ride', 0],
+};
+
+/** @returns {{pad: string, lane: number}} unknown notes go to the snare lane as their own pad */
+export function padOf(note) {
+  const [pad, lane] = PADS[note] || [`note${note}`, 3];
+  return { pad, lane };
+}
+
 export class MidiInput {
   constructor({ onNote, onChange }) {
     this.onNote = onNote;

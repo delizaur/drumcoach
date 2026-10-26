@@ -50,7 +50,7 @@ export class Timeline extends CanvasView {
 
   /**
    * @param {object} s
-   *  now, rate, notes, beats, sections, scorer, hiddenBar(bar)→bool
+   *  now, rate, notes, beats, sections, scorer, lanes (names), hiddenBar(bar)→bool
    */
   draw(s) {
     this.last = s;
@@ -63,12 +63,19 @@ export class Timeline extends CanvasView {
     const toX = t => hitX + ((t - s.now) / s.rate) * pxPerMs;
     const t0 = s.now - (hitX / pxPerMs) * s.rate - 50;
     const t1 = s.now + ((w - hitX) / pxPerMs) * s.rate + 50;
-    const noteY = Math.round(h * 0.44), hitY = Math.round(h * 0.78);
+    // layout: header (tempo, bar numbers) · grid row (the rhythm) · one lane per drum
+    const gridY = 38;
+    const laneTop = 56, laneBottom = h - 4;
+    const nLanes = s.lanes.length;
+    const laneH = (laneBottom - laneTop) / nLanes;
+    const laneY = lane => laneTop + laneH * (lane + 0.5);
 
-    // lanes
     g.fillStyle = 'rgba(255,255,255,0.035)';
-    g.fillRect(0, noteY - 20, w, 40);
-    g.fillRect(0, hitY - 13, w, 26);
+    g.fillRect(0, gridY - 12, w, 24);
+    for (let l = 0; l < nLanes; l++) {
+      g.fillStyle = l % 2 ? 'rgba(255,255,255,0.025)' : 'rgba(255,255,255,0.045)';
+      g.fillRect(0, laneTop + l * laneH, w, laneH);
+    }
 
     // silent bars (gap trainer)
     if (s.hiddenBar) {
@@ -82,7 +89,7 @@ export class Timeline extends CanvasView {
           g.fillStyle = alpha(c.accent, 0.07);
           g.fillRect(x0, 0, x1 - x0, h);
           g.fillStyle = alpha(c.accent, 0.7);
-          g.fillText('SILENT · keep going', Math.max(x0, 0) + 6, h - 8);
+          g.fillText('SILENT · keep going', Math.max(x0, 0) + 6, gridY + 4);
         }
       }
     }
@@ -91,12 +98,12 @@ export class Timeline extends CanvasView {
     g.textAlign = 'left';
     for (let i = lowerBound(s.beats, t0); i < s.beats.length && s.beats[i].t <= t1; i++) {
       const b = s.beats[i], x = Math.round(toX(b.t)) + 0.5;
-      g.strokeStyle = b.downbeat ? 'rgba(255,255,255,0.22)' : 'rgba(255,255,255,0.08)';
+      g.strokeStyle = b.downbeat ? 'rgba(255,255,255,0.22)' : 'rgba(255,255,255,0.09)';
       g.lineWidth = b.downbeat ? 1.5 : 1;
-      g.beginPath(); g.moveTo(x, b.downbeat ? 18 : 26); g.lineTo(x, h - 4); g.stroke();
+      g.beginPath(); g.moveTo(x, b.downbeat ? 18 : gridY - 10); g.lineTo(x, laneBottom); g.stroke();
       if (b.downbeat) {
         g.fillStyle = c.faint; g.font = '11px system-ui';
-        g.fillText(String(b.bar + 1), x + 4, 30);
+        g.fillText(String(b.bar + 1), x + 4, 24);
       }
     }
 
@@ -108,19 +115,23 @@ export class Timeline extends CanvasView {
       const prev = s.sections[i - 1];
       const bpm = (60000 / sec.beatLength) * s.rate;
       if (prev && Math.abs(prev.beatLength - sec.beatLength) < 0.01 && prev.meter === sec.meter) continue;
-      const x = Math.max(4, toX(sec.start) + 4);
+      const x = Math.max(70, toX(sec.start) + 4);
       g.fillStyle = c.accent;
-      g.fillText(`${+bpm.toFixed(1)} BPM${sec.meter !== 4 ? ` · ${sec.meter}/4` : ''}`, x, 14);
+      g.fillText(`${+bpm.toFixed(1)} BPM${sec.meter !== 4 ? ` · ${sec.meter}/4` : ''}`, x, 13);
     }
 
-    // notes
+    // grid notes: where strokes may land (on any drum)
     const sc = s.scorer;
     for (let i = lowerBound(s.notes, t0); i < s.notes.length && s.notes[i].t <= t1; i++) {
       const n = s.notes[i], x = toX(n.t), j = sc.judge[i];
-      const r = n.downbeat ? 9 : n.onBeat ? 7.5 : 6;
+      const r = n.downbeat ? 7 : n.onBeat ? 6 : 4.5;
+      if (!n.onBeat) { // faint guide through the lanes for subdivisions
+        g.strokeStyle = 'rgba(255,255,255,0.04)'; g.lineWidth = 1;
+        g.beginPath(); g.moveTo(Math.round(x) + 0.5, laneTop); g.lineTo(Math.round(x) + 0.5, laneBottom); g.stroke();
+      }
       if (i < sc.first) {
         g.strokeStyle = c.faint; g.lineWidth = 1.5;
-        g.beginPath(); g.arc(x, noteY, r - 1, 0, Math.PI * 2); g.stroke();
+        g.beginPath(); g.arc(x, gridY, r - 1, 0, Math.PI * 2); g.stroke();
         continue;
       }
       if (j === -1) {
@@ -128,50 +139,54 @@ export class Timeline extends CanvasView {
         if (n.t < s.now - sc.windows.good * s.rate) {
           // grid note that wasn't played: that's allowed, just fade it out
           g.strokeStyle = 'rgba(255,255,255,0.16)'; g.lineWidth = 1.5;
-          g.beginPath(); g.arc(x, noteY, r - 1, 0, Math.PI * 2); g.stroke();
+          g.beginPath(); g.arc(x, gridY, r - 1, 0, Math.PI * 2); g.stroke();
           continue;
         }
         g.fillStyle = n.downbeat ? '#ffffff' : '#d9dde6';
-        g.beginPath(); g.arc(x, noteY, r, 0, Math.PI * 2); g.fill();
+        g.beginPath(); g.arc(x, gridY, r, 0, Math.PI * 2); g.fill();
       } else {
         g.fillStyle = alpha(c.judge[j], 0.35);
         g.strokeStyle = c.judge[j]; g.lineWidth = 2;
-        g.beginPath(); g.arc(x, noteY, r, 0, Math.PI * 2); g.fill(); g.stroke();
+        g.beginPath(); g.arc(x, gridY, r, 0, Math.PI * 2); g.fill(); g.stroke();
       }
     }
 
-    // hits and their offset links
+    // strokes in their drum's lane, with a line back to the grid note they snapped to
+    const offsetLink = (gx, x, y, col, dashed) => {
+      g.strokeStyle = alpha(col, 0.55); g.lineWidth = 1.5;
+      if (dashed) g.setLineDash([3, 3]);
+      g.beginPath(); g.moveTo(gx, y); g.lineTo(x, y); g.stroke();
+      g.setLineDash([]);
+      g.beginPath(); g.moveTo(gx, y - 6); g.lineTo(gx, y + 6); g.stroke(); // target tick
+    };
+    const r = Math.min(7, laneH * 0.3);
     for (let k = sc.hits.length - 1; k >= 0; k--) {
       const hit = sc.hits[k];
       if (hit.t < t0) break;
       if (hit.t > t1) continue;
-      const x = toX(hit.t), nx = toX(s.notes[hit.i].t), col = c.judge[hit.j];
-      g.strokeStyle = alpha(col, 0.45); g.lineWidth = 1.5;
-      g.beginPath(); g.moveTo(nx, noteY + 10); g.lineTo(x, hitY - 11); g.stroke();
+      const x = toX(hit.t), y = laneY(hit.lane), col = c.judge[hit.j];
+      offsetLink(toX(s.notes[hit.i].t), x, y, col, false);
       g.fillStyle = col;
-      g.fillRect(x - 1.5, hitY - 11, 3, 22);
+      g.beginPath(); g.arc(x, y, r, 0, Math.PI * 2); g.fill();
     }
-    // strokes too far off the grid
     for (let k = sc.misses.length - 1; k >= 0; k--) {
       const m = sc.misses[k];
       if (m.t < t0) break;
       if (m.t > t1) continue;
-      const x = toX(m.t), nx = toX(s.notes[m.i].t), col = c.judge[MISS];
-      g.strokeStyle = alpha(col, 0.4); g.lineWidth = 1.5; g.setLineDash([3, 3]);
-      g.beginPath(); g.moveTo(nx, noteY + 10); g.lineTo(x, hitY - 11); g.stroke(); g.setLineDash([]);
-      g.strokeStyle = col; g.lineWidth = 2;
+      const x = toX(m.t), y = laneY(m.lane), col = c.judge[MISS];
+      offsetLink(toX(s.notes[m.i].t), x, y, col, true);
+      g.strokeStyle = col; g.lineWidth = 2.25;
       g.beginPath();
-      g.moveTo(x - 5, hitY - 5); g.lineTo(x + 5, hitY + 5);
-      g.moveTo(x + 5, hitY - 5); g.lineTo(x - 5, hitY + 5);
+      g.moveTo(x - r, y - r); g.lineTo(x + r, y + r);
+      g.moveTo(x + r, y - r); g.lineTo(x - r, y + r);
       g.stroke();
     }
     for (let k = sc.extras.length - 1; k >= 0; k--) {
       const e = sc.extras[k];
       if (e.t < t0) break;
       if (e.t > t1) continue;
-      const x = toX(e.t);
-      g.fillStyle = alpha(c.extra, 0.6);
-      g.fillRect(x - 1, hitY - 7, 2, 14);
+      g.strokeStyle = alpha(c.extra, 0.8); g.lineWidth = 1.5;
+      g.beginPath(); g.arc(toX(e.t), laneY(e.lane), r * 0.7, 0, Math.PI * 2); g.stroke();
     }
 
     // hit line
@@ -179,6 +194,19 @@ export class Timeline extends CanvasView {
     g.fillRect(hitX - 6, 0, 12, h);
     g.fillStyle = c.accent;
     g.fillRect(hitX - 1, 0, 2, h);
+
+    // lane labels
+    g.font = '600 10.5px system-ui'; g.textAlign = 'left'; g.textBaseline = 'middle';
+    const label = (text, y, color) => {
+      const tw = g.measureText(text).width;
+      g.fillStyle = 'rgba(12,14,18,0.75)';
+      g.fillRect(4, y - 8, tw + 10, 16);
+      g.fillStyle = color;
+      g.fillText(text, 9, y + 0.5);
+    };
+    s.lanes.forEach((name, l) => label(name.toUpperCase(), laneY(l), c.muted));
+    label('GRID', gridY, c.faint);
+    g.textBaseline = 'alphabetic';
   }
 }
 

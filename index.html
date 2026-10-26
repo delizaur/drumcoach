@@ -78,9 +78,13 @@
       <section id="songPane" class="pane" hidden>
         <div id="dropZone" class="drop" tabindex="0">
           <strong>Drop an osu! beatmap (.osz)</strong>
-          <span>or an .osu file together with its audio</span>
-          <button class="btn" id="browseBtn" type="button">Browse…</button>
+          <span>or a beatmap folder, or several (your whole Songs folder works too)</span>
+          <div class="drop-buttons">
+            <button class="btn" id="browseBtn" type="button">Choose files…</button>
+            <button class="btn" id="folderBtn" type="button">Choose folder…</button>
+          </div>
           <input type="file" id="fileInput" multiple hidden accept=".osz,.osu,.zip,.mp3,.ogg,.wav,.m4a,.flac,audio/*">
+          <input type="file" id="folderInput" webkitdirectory hidden>
         </div>
         <p id="songError" class="error" hidden></p>
         <div id="songInfo" hidden>

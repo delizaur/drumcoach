@@ -8,7 +8,7 @@ It's a fully static site: no backend, no build step, no dependencies. Everything
 
 - **USB MIDI input** through the Web MIDI API. Note-on events from any kit, with per-pad muting and a velocity threshold to filter out crosstalk.
 - **Metronome mode** with any tempo and time signature, a count-in, a **speed trainer** (+N BPM every M bars) and a **gap trainer** (the click and the notes go silent for some bars, so you have to keep time on your own).
-- **Song mode with osu! beatmaps.** Drop an `.osz` file (or an `.osu` plus its audio). The app plays the song and follows every uninherited timing point (BPM, offset, meter). Hit objects are ignored. You can choose the start position and playback speed, and set a timing offset for each song.
+- **Song mode with osu! beatmaps.** Drop an `.osz` file, an unpacked beatmap folder (or several, even your whole osu! `Songs` folder), or an `.osu` plus its audio. The app plays the song and follows every uninherited timing point (BPM, offset, meter). Hit objects are ignored. You can choose the start position and playback speed, and set a timing offset for each song.
 - **Rhythm grids:** quarters, halves, 8ths, off-beats, triplets, swing, 16ths, gallops, sextuplets, backbeat, son clave, or your own grid (for example `x..x..x.` in 16ths).
 - **Feedback:** a scrolling note highway, an osu!-style hit-error meter, live accuracy / mean offset / consistency (σ and UR), a timing-over-time chart, and an end-of-session report broken down by subdivision and tempo.
 - **Latency calibration:** tap along to a click and the app measures your whole setup's offset (kit → USB → browser → speakers → ears).

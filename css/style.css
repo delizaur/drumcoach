@@ -141,11 +141,13 @@ input[type=range] { width: 100%; accent-color: var(--accent); margin: 6px 0 2px;
   background: var(--panel-2); transition: border-color .15s, background .15s; cursor: pointer;
 }
 .drop span { color: var(--muted); font-size: 13px; }
-.drop .btn { margin-top: 8px; }
+.drop-buttons { display: flex; gap: 8px; flex-wrap: wrap; justify-content: center; margin-top: 8px; }
 .drop.over { border-color: var(--accent); background: var(--accent-soft); }
 .drop.compact { padding: 12px; flex-direction: row; justify-content: space-between; text-align: left; }
 .drop.compact span { display: none; }
-.drop.compact .btn { margin: 0; }
+.drop.compact .drop-buttons { margin: 0; flex-wrap: nowrap; gap: 6px; }
+.drop.compact .btn { padding: 6px 10px; font-size: 13px; white-space: nowrap; }
+.drop.compact strong { font-size: 14px; }
 .error { color: var(--miss); font-size: 13px; }
 
 .song-card { position: relative; overflow: hidden; border-radius: var(--radius); margin: 14px 0; border: 1px solid var(--border); min-height: 96px; display: flex; align-items: flex-end; }

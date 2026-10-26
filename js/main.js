@@ -8,7 +8,7 @@ import { Scorer, STRICTNESS, JUDGMENTS, MISS } from './scorer.js';
 import { Timeline, ErrorMeter, Scatter, Histogram, drawCalibStrip } from './render.js';
 import { Calibration } from './calibration.js';
 import { library } from './library.js';
-import { lowerBound, clamp, fmtTime, fmtMs, escapeHtml } from './util.js';
+import { lowerBound, clamp, fmtTime, fmtMs, escapeHtml, basename } from './util.js';
 
 const $ = id => document.getElementById(id);
 
@@ -443,26 +443,42 @@ function showSongError(msg) {
   $('songError').hidden = !msg;
 }
 
-async function filesToEntries(files) {
+// A song's source files are { file, path } items; `path` is relative to the beatmap folder.
+// (Library records saved by older versions hold plain File objects.)
+const asItems = list => [...list].map(x => (x instanceof Blob ? { file: x, path: x.name } : x));
+const isArchive = path => /\.(osz|zip)$/i.test(path);
+
+async function filesToEntries(items) {
   const entries = [];
-  for (const f of files) {
-    if (/\.(osz|zip)$/i.test(f.name)) entries.push(...await readZip(f));
-    else entries.push({ name: f.name, size: f.size, bytes: async () => new Uint8Array(await f.arrayBuffer()) });
+  for (const { file, path } of items) {
+    if (isArchive(path)) entries.push(...await readZip(file));
+    else entries.push({ name: path, size: file.size, bytes: async () => new Uint8Array(await file.arrayBuffer()) });
   }
   return entries;
 }
 
-async function loadSong(files, { fromLibrary = false } = {}) {
-  showSongError('');
-  const drop = $('dropZone');
-  const label = drop.querySelector('strong');
-  const oldLabel = label.textContent;
-  label.textContent = 'Loading…';
-  try {
-    const diffs = await loadBeatmapSet(await filesToEntries(files));
-    const fallbackAudio = diffs.find(d => d.audioEntry).audioEntry;
-    for (const d of diffs) d.audioEntry ||= fallbackAudio;
+/** Parses a song's files. Also returns the subset worth keeping in the library. */
+async function readSongSet(items) {
+  const diffs = await loadBeatmapSet(await filesToEntries(items));
+  const fallbackAudio = diffs.find(d => d.audioEntry).audioEntry;
+  for (const d of diffs) d.audioEntry ||= fallbackAudio;
+  // Unpacked folders can hold videos, storyboards and hitsounds; only keep what we use.
+  const used = new Set(diffs.flatMap(d => [d.audioEntry?.name, d.bgEntry?.name]));
+  const keep = items.length === 1 && isArchive(items[0].path)
+    ? items
+    : items.filter(it => /\.osu$/i.test(it.path) || used.has(it.path));
+  return { diffs, keep };
+}
 
+const libraryRecord = (diffs, files) => ({
+  id: songKey(diffs[0]), title: diffs[0].title, artist: diffs[0].artist, creator: diffs[0].creator, files, usedAt: Date.now(),
+});
+
+async function loadSong(list, { fromLibrary = false } = {}) {
+  showSongError('');
+  $('dropZone').querySelector('strong').textContent = 'Loading…';
+  try {
+    const { diffs, keep } = await readSongSet(asItems(list));
     const next = { key: songKey(diffs[0]), diffs, diff: null, diffIndex: -1, buffer: null, audioName: null, durationMs: 0, decoderOffset: 0, bgName: null, bgUrl: null };
     const prefs = settings.songPrefs[next.key];
     await selectDifficulty(next, prefs && prefs.diff < diffs.length ? prefs.diff : 0);
@@ -473,14 +489,13 @@ async function loadSong(files, { fromLibrary = false } = {}) {
     settings.lastSong = song.key;
     save();
     if (fromLibrary) library.touch(song.key);
-    else await library.put({ id: song.key, title: diffs[0].title, artist: diffs[0].artist, creator: diffs[0].creator, files: [...files], usedAt: Date.now() });
+    else await library.put(libraryRecord(diffs, keep));
   } catch (err) {
     console.error(err);
     showSongError(err?.name === 'EncodingError'
       ? "Couldn't decode the song's audio. Your browser may not support this format (Safari can't play .ogg)."
       : err?.message || String(err));
   } finally {
-    label.textContent = oldLabel;
     renderSongInfo();
     renderLibrary();
     updateStartButton();
@@ -507,21 +522,86 @@ async function selectDifficulty(target, index) {
   target.diffIndex = index;
 }
 
-async function handleFiles(fileList) {
-  const files = [...fileList];
-  if (!files.length) return;
-  const archives = files.filter(f => /\.(osz|zip)$/i.test(f.name));
-  const loose = files.filter(f => !archives.includes(f));
-  const groups = archives.map(a => [a]);
-  if (loose.length) groups.push(loose);
-  for (const g of groups) await loadSong(g);
+const dirOf = path => (path.includes('/') ? path.slice(0, path.lastIndexOf('/')) : '');
+
+/**
+ * Splits dropped/selected items into songs: each archive is one song, and so is each folder
+ * containing .osu files (with everything below it). Loose top-level files form one song.
+ */
+function groupItems(items) {
+  items = items.filter(it => !basename(it.path).startsWith('.'));
+  const archives = items.filter(it => isArchive(it.path));
+  const rest = items.filter(it => !isArchive(it.path));
+  const roots = [...new Set(rest.filter(it => /\.osu$/i.test(it.path)).map(it => dirOf(it.path)))]
+    .sort((a, b) => b.length - a.length); // deepest first, so nested beatmap folders win
+  if (!roots.length) return [...archives.map(a => [a]), ...(rest.length ? [rest] : [])];
+
+  const groups = new Map();
+  for (const it of rest) {
+    const root = roots.find(r => r === '' || it.path.startsWith(r + '/'));
+    if (root === undefined) continue; // not inside any beatmap folder
+    if (!groups.has(root)) groups.set(root, []);
+    groups.get(root).push({ file: it.file, path: root ? it.path.slice(root.length + 1) : it.path });
+  }
+  const folders = [...groups.entries()].sort(([a], [b]) => a.localeCompare(b)).map(([, g]) => g);
+  return [...archives.map(a => [a]), ...folders];
 }
+
+/** Files from a drop, including everything inside dropped folders. */
+async function droppedItems(dataTransfer) {
+  // Entries must be grabbed synchronously: the DataTransfer is emptied once the handler yields.
+  const entries = [...(dataTransfer.items || [])].map(i => i.webkitGetAsEntry?.()).filter(Boolean);
+  if (!entries.length) return [...dataTransfer.files].map(f => ({ file: f, path: f.name }));
+  const out = [];
+  const walk = async entry => {
+    if (entry.isFile) {
+      const file = await new Promise((resolve, reject) => entry.file(resolve, reject));
+      out.push({ file, path: entry.fullPath.replace(/^\//, '') });
+    } else if (entry.isDirectory) {
+      const reader = entry.createReader();
+      for (;;) { // readEntries returns results in batches
+        const batch = await new Promise((resolve, reject) => reader.readEntries(resolve, reject));
+        if (!batch.length) break;
+        for (const e of batch) await walk(e);
+      }
+    }
+  };
+  for (const e of entries) await walk(e);
+  return out;
+}
+
+async function handleItems(itemsPromise) {
+  const label = $('dropZone').querySelector('strong');
+  label.textContent = 'Reading files…';
+  const groups = groupItems(await itemsPromise);
+  if (!groups.length) { renderSongInfo(); return; }
+  if (groups.length > 30 && !confirm(`Add ${groups.length} beatmaps to your songs?`)) { renderSongInfo(); return; }
+
+  // Every song but the last is only parsed and saved; the last one is opened.
+  const failed = [];
+  for (let k = 0; k < groups.length - 1; k++) {
+    label.textContent = `Importing ${k + 1} / ${groups.length}…`;
+    try {
+      const { diffs, keep } = await readSongSet(groups[k]);
+      await library.put(libraryRecord(diffs, keep));
+    } catch {
+      failed.push(groups[k][0]?.path || '?');
+    }
+  }
+  await loadSong(groups[groups.length - 1]);
+  if (failed.length) {
+    const msg = `${failed.length} of ${groups.length} beatmaps couldn't be read.`;
+    showSongError($('songError').hidden ? msg : `${$('songError').textContent} ${msg}`);
+  }
+}
+
+const fileItems = files => [...files].map(f => ({ file: f, path: f.webkitRelativePath || f.name }));
 
 function renderSongInfo() {
   const has = !!song?.diff;
   $('songInfo').hidden = !has;
   $('dropZone').classList.toggle('compact', has);
-  $('dropZone').querySelector('strong').textContent = has ? 'Load another beatmap' : 'Drop an osu! beatmap (.osz)';
+  $('dropZone').querySelector('strong').textContent = has ? 'Add songs' : 'Drop an osu! beatmap (.osz)';
   const bgCss = has && song.bgUrl ? `url("${song.bgUrl}")` : '';
   $('songBg').style.backgroundImage = bgCss;
   $('stageBg').style.backgroundImage = settings.mode === 'song' ? bgCss : '';
@@ -582,22 +662,25 @@ const drop = $('dropZone');
 $('browseBtn').onclick = e => { e.stopPropagation(); $('fileInput').click(); };
 drop.onclick = () => $('fileInput').click();
 drop.onkeydown = e => { if (e.key === 'Enter') $('fileInput').click(); };
-$('fileInput').onchange = e => { handleFiles(e.target.files); e.target.value = ''; };
+$('fileInput').onchange = e => { handleItems(fileItems(e.target.files)); e.target.value = ''; };
+$('folderBtn').onclick = e => { e.stopPropagation(); $('folderInput').click(); };
+$('folderInput').onchange = e => { handleItems(fileItems(e.target.files)); e.target.value = ''; };
 drop.addEventListener('dragover', e => { e.preventDefault(); drop.classList.add('over'); });
 drop.addEventListener('dragleave', () => drop.classList.remove('over'));
 drop.addEventListener('drop', e => {
   e.preventDefault();
   e.stopPropagation();
   drop.classList.remove('over');
-  handleFiles(e.dataTransfer.files);
+  handleItems(droppedItems(e.dataTransfer));
 });
 // Dropping a beatmap anywhere on the page switches to song mode.
 window.addEventListener('dragover', e => e.preventDefault());
 window.addEventListener('drop', e => {
   e.preventDefault();
-  if (session || !e.dataTransfer?.files?.length) return;
+  if (session || !e.dataTransfer?.items?.length) return;
+  const items = droppedItems(e.dataTransfer);
   setMode('song');
-  handleFiles(e.dataTransfer.files);
+  handleItems(items);
 });
 
 $('diffSelect').onchange = async e => {

@@ -112,6 +112,7 @@ export async function loadBeatmapSet(entries) {
 }
 
 export function songKey(d) {
+  if (d.plain) return `audio:${d.audioFilename.toLowerCase()}`;
   return d.setId ? `set:${d.setId}` : `${d.artistAscii || d.artist} - ${d.titleAscii || d.title} (${d.creator})`;
 }
 

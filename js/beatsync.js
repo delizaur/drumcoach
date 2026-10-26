@@ -46,6 +46,13 @@ function onsetCurve(x, sampleRate) {
   return curve;
 }
 
+/** Combined kick + snare/cymbal onset curve of a song, one value per millisecond. */
+export async function drumOnsets(buffer) {
+  const [low, high] = await Promise.all([bandPass(buffer, 'lowpass', 150), bandPass(buffer, 'highpass', 2500)]);
+  const a = onsetCurve(low, buffer.sampleRate), b = onsetCurve(high, buffer.sampleRate);
+  return a.map((v, i) => v + b[i]);
+}
+
 /** Best shift (ms) for a list of beat times, and how clearly it stands out. */
 function bestShift(curve, beats) {
   const at = t => {
@@ -72,9 +79,7 @@ function bestShift(curve, beats) {
  *   flagged: object[]}>} offset: ms to move the map's beats later (negative = earlier)
  */
 export async function analyzeSync(buffer, redLines) {
-  const [low, high] = await Promise.all([bandPass(buffer, 'lowpass', 150), bandPass(buffer, 'highpass', 2500)]);
-  const a = onsetCurve(low, buffer.sampleRate), b = onsetCurve(high, buffer.sampleRate);
-  const curve = a.map((v, i) => v + b[i]);
+  const curve = await drumOnsets(buffer);
 
   const duration = buffer.duration * 1000;
   const perSection = redLines.map((r, i) => {

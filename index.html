@@ -28,7 +28,7 @@
     <aside class="panel setup">
       <div class="tabs" role="tablist">
         <button class="tab" role="tab" data-mode="metronome">Metronome</button>
-        <button class="tab" role="tab" data-mode="song">Song (osu!)</button>
+        <button class="tab" role="tab" data-mode="song">Song</button>
       </div>
 
       <!-- Metronome mode -->
@@ -78,7 +78,7 @@
       <section id="songPane" class="pane" hidden>
         <div id="dropZone" class="drop" tabindex="0">
           <strong>Drop an osu! beatmap (.osz)</strong>
-          <span>or a beatmap folder, or several (your whole Songs folder works too)</span>
+          <span>or a beatmap folder, or several (your whole Songs folder works too) · or any audio file, and the tempo is detected</span>
           <div class="drop-buttons">
             <button class="btn" id="browseBtn" type="button">Choose files…</button>
             <button class="btn" id="folderBtn" type="button">Choose folder…</button>
@@ -95,6 +95,24 @@
               <div class="song-artist" id="songArtist"></div>
               <div class="song-meta" id="songMeta"></div>
             </div>
+          </div>
+          <div class="tempo-box" id="tempoBox" hidden>
+            <div class="tempo-head"><span>Detected tempo</span><b id="tempoBpm">—</b></div>
+            <p class="tempo-warn" id="tempoWarn" hidden>No clear beat found. The detected grid may be wrong; check it with the preview.</p>
+            <div class="tempo-label">Options</div>
+            <div class="tempo-cands" id="tempoCands"></div>
+            <div class="tempo-actions">
+              <button class="btn small" id="tempoHalve" type="button" title="Half the tempo">÷2</button>
+              <button class="btn small" id="tempoDouble" type="button" title="Double the tempo">×2</button>
+              <button class="btn small" id="tempoShift" type="button" title="Use this if the click falls between the beats">Shift ½ beat<span id="tempoHalfState"></span></button>
+            </div>
+            <div class="tempo-actions">
+              <label for="tempoMeter" class="tempo-label">Beats per bar</label>
+              <select id="tempoMeter"><option>2</option><option>3</option><option>4</option><option>5</option><option>6</option><option>7</option></select>
+              <button class="btn small" id="tempoBar" type="button" title="Move the downbeat (the accented click) one beat later">Move bar start</button>
+            </div>
+            <button class="btn" id="tempoPreview" type="button">▶ Preview with click</button>
+            <small>Detection works for songs with a steady tempo. Listen to the preview: if the click doesn't sit on the beat, try the other options or shift by half a beat.</small>
           </div>
           <div class="field" id="diffField">
             <label for="diffSelect">Difficulty (timing source)</label>

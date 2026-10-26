@@ -3,6 +3,7 @@ import { MidiInput, drumName, padOf, LANES } from './midi.js';
 import { readZip } from './zip.js';
 import { loadBeatmapSet, songKey, tempoSummary } from './osu.js';
 import { analyzeSync, SYNC_VERSION } from './beatsync.js';
+import { detectTempo, TEMPO_VERSION } from './tempo.js';
 import { PATTERNS, makePattern, songSections, metronomeSections, buildGrid, sectionAt } from './timing.js';
 import { Scorer, STRICTNESS, JUDGMENTS, MISS } from './scorer.js';
 import { Timeline, ErrorMeter, Scatter, Histogram, drawCalibStrip } from './render.js';
@@ -168,7 +169,7 @@ function buildClicks(grid, mode, hiddenBar, from) {
   return events.filter(e => e.t >= from - 1);
 }
 
-async function startSession() {
+async function startSession({ preview = false } = {}) {
   if (session) return;
   if (settings.mode === 'song' && !song?.diff) return;
   await audio.init();
@@ -195,7 +196,8 @@ async function startSession() {
     startPos = clamp(prefs.startAt, 0, Math.max(0, endMs - 3000));
     const sec = sections[sectionAt(sections, startPos)];
     scoreFrom = startPos + Math.max(1000 * rate, 2 * sec.beatLength);
-    if (!settings.songClick) clickMode = 'off';
+    if (preview) clickMode = settings.clickMode === 'off' ? 'beats' : settings.clickMode;
+    else if (!settings.songClick) clickMode = 'off';
   } else {
     const { bpm, meter, countIn } = settings;
     const trainer = settings.trainerOn
@@ -211,6 +213,7 @@ async function startSession() {
 
   const grid = buildGrid(sections, pattern);
   session = {
+    preview,
     mode: settings.mode,
     title: settings.mode === 'song'
       ? `${song.diff.artist} – ${song.diff.title} [${song.diff.version}]`
@@ -268,7 +271,7 @@ function stopSession(withResults) {
   updateStartButton();
 
   drawScatter(s, true);
-  if (withResults && s.scorer.stats().judged >= 4) showResults(s);
+  if (withResults && !s.preview && s.scorer.stats().judged >= 4) showResults(s);
 }
 
 // ================================================================ frame loop
@@ -510,8 +513,29 @@ async function filesToEntries(items) {
 }
 
 /** Parses a song's files. Also returns the subset worth keeping in the library. */
+const AUDIO_RE = /\.(mp3|ogg|wav|m4a|flac|opus|aac)$/i;
+
+/** A song without an osu! map: its beat grid is detected from the audio when it loads. */
+function plainDiff(entry) {
+  const base = basename(entry.name).replace(/\.[^.]+$/, '');
+  const dash = base.indexOf(' - ');
+  const [artist, title] = dash > 0 ? [base.slice(0, dash), base.slice(dash + 3)] : ['', base];
+  return {
+    plain: true, title, titleAscii: title, artist, artistAscii: artist, creator: '', version: 'Detected tempo',
+    setId: 0, audioFilename: basename(entry.name), audioEntry: entry, bgEntry: null, timing: [],
+  };
+}
+
 async function readSongSet(items) {
-  const diffs = await loadBeatmapSet(await filesToEntries(items));
+  const entries = await filesToEntries(items);
+  if (!entries.some(e => /\.osu$/i.test(e.name))) {
+    const audioEntry = entries.find(e => AUDIO_RE.test(e.name));
+    if (audioEntry) {
+      const keep = items.length === 1 && isArchive(items[0].path) ? items : items.filter(it => it.path === audioEntry.name);
+      return { diffs: [plainDiff(audioEntry)], keep };
+    }
+  }
+  const diffs = await loadBeatmapSet(entries);
   const fallbackAudio = diffs.find(d => d.audioEntry).audioEntry;
   for (const d of diffs) d.audioEntry ||= fallbackAudio;
   // Unpacked folders can hold videos, storyboards and hitsounds; only keep what we use.
@@ -534,6 +558,10 @@ async function loadSong(list, { fromLibrary = false } = {}) {
     const next = { key: songKey(diffs[0]), diffs, diff: null, diffIndex: -1, buffer: null, audioName: null, durationMs: 0, bgName: null, bgUrl: null, sync: null, syncReady: null };
     const prefs = settings.songPrefs[next.key];
     await selectDifficulty(next, prefs && prefs.diff < diffs.length ? prefs.diff : 0);
+    if (next.diff.plain) {
+      $('dropZone').querySelector('strong').textContent = 'Detecting tempo…';
+      await setupPlain(next);
+    }
     startSync(next);
     if (song?.bgUrl) URL.revokeObjectURL(song.bgUrl);
     song = next;
@@ -584,7 +612,10 @@ function groupItems(items) {
   const rest = items.filter(it => !isArchive(it.path));
   const roots = [...new Set(rest.filter(it => /\.osu$/i.test(it.path)).map(it => dirOf(it.path)))]
     .sort((a, b) => b.length - a.length); // deepest first, so nested beatmap folders win
-  if (!roots.length) return [...archives.map(a => [a]), ...(rest.length ? [rest] : [])];
+  // audio files outside any beatmap folder become songs of their own (tempo is detected)
+  const loneAudio = rest.filter(it => AUDIO_RE.test(it.path) && !roots.some(r => r === '' || it.path.startsWith(r + '/')))
+    .map(it => [{ file: it.file, path: basename(it.path) }]);
+  if (!roots.length) return [...archives.map(a => [a]), ...loneAudio];
 
   const groups = new Map();
   for (const it of rest) {
@@ -594,7 +625,7 @@ function groupItems(items) {
     groups.get(root).push({ file: it.file, path: root ? it.path.slice(root.length + 1) : it.path });
   }
   const folders = [...groups.entries()].sort(([a], [b]) => a.localeCompare(b)).map(([, g]) => g);
-  return [...archives.map(a => [a]), ...folders];
+  return [...archives.map(a => [a]), ...folders, ...loneAudio];
 }
 
 /** Files from a drop, including everything inside dropped folders. */
@@ -624,6 +655,11 @@ async function droppedItems(dataTransfer) {
 function startSync(target) {
   const prefs = (settings.songPrefs[target.key] ||= { offset: 0, diff: 0, startAt: 0 });
   const cache = (prefs.sync ||= {});
+  if (target.diff.plain) {
+    target.sync = { v: SYNC_VERSION, ok: true, offset: 0, confidence: 99, flagged: [], plain: true };
+    target.syncReady = Promise.resolve(target.sync);
+    return;
+  }
   const key = target.diff.version;
   const cached = cache[key];
   if (cached?.v === SYNC_VERSION) {
@@ -652,6 +688,36 @@ function startSync(target) {
       console.warn('Beat sync analysis failed', err);
       return done({ v: SYNC_VERSION, ok: false, offset: 0, confidence: 0, flagged: [] });
     });
+}
+
+/** Detects (or reuses the cached) tempo candidates of a plain audio song and builds its grid. */
+async function setupPlain(target) {
+  const prefs = (settings.songPrefs[target.key] ||= { offset: 0, diff: 0, startAt: 0 });
+  if (prefs.tempoDetect?.v !== TEMPO_VERSION) {
+    const r = await detectTempo(target.buffer);
+    prefs.tempoDetect = { v: TEMPO_VERSION, clear: r.clear, candidates: r.candidates.map(c => ({ period: c.period, phase: c.phase })) };
+  }
+  prefs.tempo ||= { cand: 0, mult: 1, half: false, meter: 4, bar: 0 };
+  applyTempo(target, prefs);
+  save();
+}
+
+/** Turns the chosen candidate plus the player's adjustments into a single timing point. */
+function applyTempo(target, prefs) {
+  const t = prefs.tempo, c = prefs.tempoDetect?.candidates[t.cand];
+  if (!c) { target.diff.timing = []; return; }
+  const P = c.period / t.mult, bar = P * t.meter;
+  const downbeat = c.phase + (t.half ? P / 2 : 0) + t.bar * P;
+  // start one bar early so the first bar is complete; beats before 0 ms are never played
+  target.diff.timing = [{ time: (((downbeat % bar) + bar) % bar) - bar, beatLength: P, meter: t.meter }];
+}
+
+function changeTempo(fn) {
+  const prefs = songPrefs();
+  fn(prefs.tempo);
+  applyTempo(song, prefs);
+  save();
+  renderSongInfo();
 }
 
 /** The automatic part of the sync: detected, typical fallback, or nothing when auto-sync is off. */
@@ -703,15 +769,20 @@ function renderSongInfo() {
   if (!has) return;
 
   const d = song.diff, prefs = songPrefs();
-  const t = tempoSummary(d.timing, song.durationMs);
   const bpm = v => +v.toFixed(1);
   $('songTitle').textContent = d.title;
-  $('songArtist').textContent = d.artist + (d.creator ? ` · mapped by ${d.creator}` : '');
-  $('songMeta').textContent = [
-    t.min === t.max ? `${bpm(t.main)} BPM` : `${bpm(t.min)}–${bpm(t.max)} BPM (mostly ${bpm(t.main)})`,
-    t.changes ? `${t.changes} timing change${t.changes > 1 ? 's' : ''}` : 'constant tempo',
-    fmtTime(song.durationMs),
-  ].join(' · ');
+  $('songArtist').textContent = d.plain ? (d.artist || 'Audio file · tempo detected') : d.artist + (d.creator ? ` · mapped by ${d.creator}` : '');
+  if (d.timing.length) {
+    const t = tempoSummary(d.timing, song.durationMs);
+    $('songMeta').textContent = [
+      t.min === t.max ? `${bpm(t.main)} BPM` : `${bpm(t.min)}–${bpm(t.max)} BPM (mostly ${bpm(t.main)})`,
+      t.changes ? `${t.changes} timing change${t.changes > 1 ? 's' : ''}` : 'constant tempo',
+      fmtTime(song.durationMs),
+    ].join(' · ');
+  } else {
+    $('songMeta').textContent = `no beat found · ${fmtTime(song.durationMs)}`;
+  }
+  renderTempo();
   renderSync();
 
   const sel = $('diffSelect');
@@ -727,11 +798,28 @@ function renderSongInfo() {
   $('songOffsetLabel').textContent = fmtMs(prefs.offset);
 }
 
+function renderTempo() {
+  const plain = !!song?.diff?.plain;
+  $('tempoBox').hidden = !plain;
+  if (!plain) return;
+  const prefs = songPrefs(), det = prefs.tempoDetect, t = prefs.tempo;
+  const cands = det?.candidates || [], c = cands[t.cand];
+  $('tempoBpm').textContent = c ? `${(60000 / c.period * t.mult).toFixed(2)} BPM` : 'no beat found';
+  $('tempoWarn').hidden = !!(c && det.clear);
+  $('tempoCands').innerHTML = cands.map((x, i) =>
+    `<button type="button" class="pad${i === t.cand ? ' hit' : ''}" data-cand="${i}" title="Option ${i + 1}">${(60000 / x.period).toFixed(2)}</button>`).join('');
+  $('tempoMeter').value = t.meter;
+  $('tempoHalfState').textContent = t.half ? ' (shifted)' : '';
+  for (const id of ['tempoHalve', 'tempoDouble', 'tempoShift', 'tempoBar', 'tempoMeter', 'tempoPreview']) $(id).disabled = !c;
+}
+
 function renderSync() {
   const el = $('songSync');
   const sync = song?.sync;
   let main, cls = '';
-  if (!settings.autoSync) {
+  if (song?.diff?.plain) {
+    main = 'Beat grid detected from the audio. Check it with the preview.';
+  } else if (!settings.autoSync) {
     main = 'Auto-sync is off, so the map\'s own timing is used.';
   } else if (!sync) {
     main = 'Analyzing the beat…';
@@ -811,6 +899,17 @@ $('diffSelect').onchange = async e => {
   save();
   renderSongInfo();
 };
+$('tempoCands').onclick = e => {
+  const b = e.target.closest('[data-cand]');
+  if (b) changeTempo(t => { t.cand = Number(b.dataset.cand); t.mult = 1; t.half = false; });
+};
+$('tempoHalve').onclick = () => changeTempo(t => { t.mult = Math.max(0.25, t.mult / 2); });
+$('tempoDouble').onclick = () => changeTempo(t => { t.mult = Math.min(4, t.mult * 2); });
+$('tempoShift').onclick = () => changeTempo(t => { t.half = !t.half; });
+$('tempoBar').onclick = () => changeTempo(t => { t.bar = (t.bar + 1) % t.meter; });
+$('tempoMeter').onchange = e => changeTempo(t => { t.meter = Number(e.target.value); t.bar %= t.meter; });
+$('tempoPreview').onclick = () => { resetLive(); startSession({ preview: true }); };
+
 $('startAt').oninput = e => {
   songPrefs().startAt = Number(e.target.value);
   $('startAtLabel').textContent = fmtTime(songPrefs().startAt);

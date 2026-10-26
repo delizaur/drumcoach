@@ -156,6 +156,16 @@ input[type=range] { width: 100%; accent-color: var(--accent); margin: 6px 0 2px;
 .song-text { position: relative; padding: 14px; }
 .song-title { font-size: 17px; font-weight: 700; line-height: 1.25; }
 .song-artist { color: #c9cfdb; font-size: 14px; }
+.tempo-box { background: var(--panel-2); border: 1px solid var(--border); border-radius: var(--radius-sm); padding: 10px 12px; margin: 0 0 14px; display: flex; flex-direction: column; gap: 8px; }
+.tempo-head { display: flex; justify-content: space-between; align-items: baseline; font-size: 13px; color: var(--muted); }
+.tempo-head b { font-size: 20px; color: var(--text); font-variant-numeric: tabular-nums; }
+.tempo-label { font-size: 12px; color: var(--muted); }
+.tempo-warn { color: var(--off); font-size: 12.5px; margin: 0; }
+.tempo-cands { display: flex; gap: 6px; flex-wrap: wrap; }
+.tempo-cands .pad { font-variant-numeric: tabular-nums; }
+.tempo-actions { display: flex; gap: 6px; align-items: center; flex-wrap: wrap; }
+.tempo-actions select { width: auto; padding: 4px 8px; }
+.btn.small { padding: 5px 10px; font-size: 13px; }
 .song-sync { font-size: 13px; background: var(--panel-2); border: 1px solid var(--border); border-radius: var(--radius-sm); padding: 8px 10px; margin: 0 0 12px; }
 .song-sync.pending { color: var(--muted); }
 .song-sync.warn { border-color: rgba(255, 154, 77, .5); }

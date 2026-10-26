@@ -72,15 +72,17 @@ midi.init();
 
 let flashTimer = 0;
 function onMidiNote(ev) {
+  // sound first: everything else can wait a millisecond
+  if (ev.velocity >= settings.minVelocity) playPad(ev.note, ev.velocity);
+  ev.delay = performance.now() - ev.time;
   const chip = $('midiChip');
   chip.classList.add('flash');
   clearTimeout(flashTimer);
   flashTimer = setTimeout(() => chip.classList.remove('flash'), 70);
   notePad(ev);
 
-  if (ev.velocity < settings.minVelocity) return;
-  playPad(ev.note, ev.velocity); // muted pads still sound, they just aren't scored
-  if (settings.mutedNotes.includes(ev.note)) return;
+  // muted pads still sound (above), they just aren't scored
+  if (ev.velocity < settings.minVelocity || settings.mutedNotes.includes(ev.note)) return;
   stroke(ev.time);
 }
 
@@ -891,7 +893,11 @@ function notePad(ev) {
   const lh = $('lastHit');
   const ignored = settings.mutedNotes.includes(ev.note) ? ' · ignored (muted)'
     : ev.velocity < settings.minVelocity ? ' · ignored (too soft)' : '';
-  lh.textContent = `${drumName(ev.note)} (note ${ev.note}) · velocity ${ev.velocity} · ch ${ev.channel} · ${ev.device}${ignored}`;
+  const out = audio.outputLatencyMs;
+  lh.textContent = `${drumName(ev.note)} (note ${ev.note}) · velocity ${ev.velocity} · ch ${ev.channel} · ${ev.device}${ignored}`
+    + `
+Delay: MIDI to page ${ev.delay.toFixed(1)} ms`
+    + (out != null && audio.ctx.state === 'running' ? ` + audio output ${out.toFixed(0)} ms (reported by your browser)` : '');
   lh.classList.add('live');
 }
 

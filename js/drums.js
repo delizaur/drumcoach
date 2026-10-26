@@ -25,13 +25,17 @@ export class DrumKit {
   constructor(ctx) {
     this.ctx = ctx;
     this.out = ctx.createGain();
-    // gentle limiter so big chords don't clip
-    const comp = ctx.createDynamicsCompressor();
-    comp.threshold.value = -10;
-    comp.ratio.value = 6;
-    comp.attack.value = 0.002;
-    comp.release.value = 0.1;
-    this.out.connect(comp).connect(ctx.destination);
+    // Soft clipper so big chords don't distort harshly. (A DynamicsCompressorNode would add a
+    // fixed 6 ms look-ahead delay to every hit; a wave shaper without oversampling adds none.)
+    const clip = ctx.createWaveShaper();
+    const curve = new Float32Array(1025);
+    for (let i = 0; i < curve.length; i++) {
+      const x = i / 512 - 1, a = Math.abs(x);
+      curve[i] = a < 0.6 ? x : Math.sign(x) * (0.6 + 0.4 * Math.tanh((a - 0.6) / 0.4)); // unity gain below the knee
+    }
+    clip.curve = curve;
+    clip.oversample = 'none';
+    this.out.connect(clip).connect(ctx.destination);
     this.noise = this.makeNoise(2);
     this.openHats = new Set();
   }

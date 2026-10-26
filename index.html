@@ -292,6 +292,11 @@
         <canvas id="calibCanvas" class="calib-canvas"></canvas>
       </div>
       <div id="calibResult" hidden></div>
+      <div class="field calib-volume">
+        <label for="calibPadVolume">Drum sound volume <output id="calibPadVolumeLabel"></output></label>
+        <input id="calibPadVolume" type="range" min="0" max="1" step="0.01">
+        <small id="calibPadHint"></small>
+      </div>
       <div class="dialog-actions">
         <button class="btn" id="calibCancel">Cancel</button>
         <button class="btn primary" id="calibStart">Start</button>

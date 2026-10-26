@@ -922,7 +922,17 @@ bind('minVelocity', 'minVelocity', { after: v => { $('minVelocityLabel').textCon
 $('minVelocityLabel').textContent = settings.minVelocity;
 bind('keyboardOn', 'keyboard', { event: 'change' });
 bind('padSounds', 'padSounds', { event: 'change' });
-bind('padVolume', 'padVolume', { after: v => { if (kit) kit.volume = v; } });
+function setPadVolume(v) {
+  settings.padVolume = clamp(v, 0, 1);
+  save();
+  if (kit) kit.volume = settings.padVolume;
+  $('padVolume').value = settings.padVolume;
+  $('calibPadVolume').value = settings.padVolume;
+  $('calibPadVolumeLabel').textContent = `${Math.round(settings.padVolume * 100)}%`;
+}
+setPadVolume(settings.padVolume);
+$('padVolume').addEventListener('input', e => setPadVolume(Number(e.target.value)));
+$('calibPadVolume').addEventListener('input', e => setPadVolume(Number(e.target.value)));
 
 function setLatency(v) {
   settings.latency = clamp(Math.round(v), -300, 600);
@@ -960,6 +970,7 @@ function openCalibration() {
   $('calibStart').hidden = false;
   $('calibStart').textContent = 'Start';
   $('calibApply').hidden = true;
+  $('calibPadHint').textContent = settings.padSounds ? '' : 'Drum sounds are turned off in Settings, so this has no effect right now.';
   $('calibDialog').showModal();
 }
 $('calibBtn').onclick = openCalibration;

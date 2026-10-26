@@ -127,8 +127,9 @@
       <!-- Shared options -->
       <section class="pane">
         <div class="field">
-          <label for="pattern">Rhythm</label>
+          <label for="pattern">Rhythm grid</label>
           <select id="pattern"></select>
+          <small>Each stroke snaps to the nearest note of this grid. You don't have to play every note: an 8th-note grid also lets you play quarters, or any mix of the two.</small>
         </div>
         <div class="field" id="customField" hidden>
           <label for="customGrid">Custom pattern</label>
@@ -188,7 +189,7 @@
         <div id="feedback" class="feedback"></div>
         <div class="idle-hint" id="idleHint">
           <div>
-            Press <b>Start</b> and play along. Notes scroll toward the line; hit when they reach it.<br>
+            Press <b>Start</b> and play along. Grid notes scroll toward the line. Play any of them; the ones you skip are fine.<br>
             <span>No kit connected? <kbd>Space</kbd>, <kbd>F</kbd> and <kbd>J</kbd> work too.</span>
           </div>
         </div>
@@ -211,9 +212,8 @@
         <span class="count perfect"><b>0</b> perfect</span>
         <span class="count great"><b>0</b> great</span>
         <span class="count good"><b>0</b> good</span>
-        <span class="count off"><b>0</b> off</span>
-        <span class="count miss"><b>0</b> miss</span>
-        <span class="count extra"><b>0</b> extra</span>
+        <span class="count miss" title="Strokes too far from any grid note"><b>0</b> miss</span>
+        <span class="count extra" title="A second stroke on a grid note that was already played"><b>0</b> doubled</span>
       </div>
 
       <div class="panel chart">

@@ -219,7 +219,7 @@ input[type=range] { width: 100%; accent-color: var(--accent); margin: 6px 0 2px;
 .count::before { content: ""; width: 8px; height: 8px; border-radius: 50%; background: currentColor; }
 .count b { color: var(--text); font-variant-numeric: tabular-nums; }
 .count.perfect { color: var(--perfect); } .count.great { color: var(--great); } .count.good { color: var(--good); }
-.count.off { color: var(--off); } .count.miss { color: var(--miss); } .count.extra { color: var(--extra); }
+.count.miss { color: var(--miss); } .count.extra { color: var(--extra); }
 .count > :not(b) { color: var(--muted); }
 
 .chart { padding: 12px 16px 14px; }

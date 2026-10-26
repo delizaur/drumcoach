@@ -7,7 +7,7 @@ let C = null;
 function colors() {
   if (!C) {
     C = {
-      judge: ['--perfect', '--great', '--good', '--off', '--miss'].map(css),
+      judge: ['--perfect', '--great', '--good', '--miss'].map(css),
       extra: css('--extra'), text: css('--text'), muted: css('--muted'), faint: css('--faint'),
       accent: css('--accent'), panel2: css('--panel-2'), border: css('--border'),
     };
@@ -125,14 +125,14 @@ export class Timeline extends CanvasView {
       }
       if (j === -1) {
         if (s.hiddenBar?.(n.bar)) continue;
+        if (n.t < s.now - sc.windows.good * s.rate) {
+          // grid note that wasn't played: that's allowed, just fade it out
+          g.strokeStyle = 'rgba(255,255,255,0.16)'; g.lineWidth = 1.5;
+          g.beginPath(); g.arc(x, noteY, r - 1, 0, Math.PI * 2); g.stroke();
+          continue;
+        }
         g.fillStyle = n.downbeat ? '#ffffff' : '#d9dde6';
         g.beginPath(); g.arc(x, noteY, r, 0, Math.PI * 2); g.fill();
-      } else if (j === MISS) {
-        g.strokeStyle = c.judge[MISS]; g.lineWidth = 2;
-        g.beginPath();
-        g.moveTo(x - 5, noteY - 5); g.lineTo(x + 5, noteY + 5);
-        g.moveTo(x + 5, noteY - 5); g.lineTo(x - 5, noteY + 5);
-        g.stroke();
       } else {
         g.fillStyle = alpha(c.judge[j], 0.35);
         g.strokeStyle = c.judge[j]; g.lineWidth = 2;
@@ -150,6 +150,20 @@ export class Timeline extends CanvasView {
       g.beginPath(); g.moveTo(nx, noteY + 10); g.lineTo(x, hitY - 11); g.stroke();
       g.fillStyle = col;
       g.fillRect(x - 1.5, hitY - 11, 3, 22);
+    }
+    // strokes too far off the grid
+    for (let k = sc.misses.length - 1; k >= 0; k--) {
+      const m = sc.misses[k];
+      if (m.t < t0) break;
+      if (m.t > t1) continue;
+      const x = toX(m.t), nx = toX(s.notes[m.i].t), col = c.judge[MISS];
+      g.strokeStyle = alpha(col, 0.4); g.lineWidth = 1.5; g.setLineDash([3, 3]);
+      g.beginPath(); g.moveTo(nx, noteY + 10); g.lineTo(x, hitY - 11); g.stroke(); g.setLineDash([]);
+      g.strokeStyle = col; g.lineWidth = 2;
+      g.beginPath();
+      g.moveTo(x - 5, hitY - 5); g.lineTo(x + 5, hitY + 5);
+      g.moveTo(x + 5, hitY - 5); g.lineTo(x - 5, hitY + 5);
+      g.stroke();
     }
     for (let k = sc.extras.length - 1; k >= 0; k--) {
       const e = sc.extras[k];
@@ -181,9 +195,9 @@ export class ErrorMeter extends CanvasView {
     const cy = h / 2;
 
     // zones, outermost first
-    const zones = [[range, 3], [s.windows.good, 2], [s.windows.great, 1], [s.windows.perfect, 0]];
+    const zones = [[range, MISS], [s.windows.good, 2], [s.windows.great, 1], [s.windows.perfect, 0]];
     for (const [r, j] of zones) {
-      g.fillStyle = alpha(c.judge[j], j === 3 ? 0.12 : 0.22);
+      g.fillStyle = alpha(c.judge[j], j === MISS ? 0.12 : 0.22);
       g.fillRect(toX(-r), cy - 5, toX(r) - toX(-r), 10);
     }
     g.fillStyle = c.text;
@@ -211,7 +225,7 @@ export class ErrorMeter extends CanvasView {
 // ---------------------------------------------------------------- scatter
 
 export class Scatter extends CanvasView {
-  /** @param {{hits, misses, notes, x0, x1, windows, sectionStarts?: number[]}} s */
+  /** @param {{hits, misses, x0, x1, windows, sectionStarts?: number[]}} s */
   draw(s) {
     this.last = s;
     const { g, w, h } = this, c = colors();
@@ -248,11 +262,10 @@ export class Scatter extends CanvasView {
       g.setLineDash([]);
     }
 
-    // misses as ticks along the bottom
-    g.fillStyle = alpha(c.judge[MISS], 0.8);
-    for (const i of s.misses) {
-      const x = toX(s.notes[i].t);
-      g.fillRect(x - 0.75, h - padB + 4, 1.5, 6);
+    // off-grid strokes as rings (clamped to the plot)
+    g.strokeStyle = alpha(c.judge[MISS], 0.9); g.lineWidth = 1.25;
+    for (const m of s.misses) {
+      g.beginPath(); g.arc(toX(m.t), toY(m.err), 2.6, 0, Math.PI * 2); g.stroke();
     }
 
     const r = s.hits.length > 1500 ? 1.4 : 2.2;
@@ -299,7 +312,7 @@ export class Histogram extends CanvasView {
       const center = -range + (b + 0.5) * bin;
       const hh = (counts[b] / max) * (h - padB - padT);
       const a = Math.abs(center);
-      const j = a <= windows.perfect ? 0 : a <= windows.great ? 1 : a <= windows.good ? 2 : 3;
+      const j = a <= windows.perfect ? 0 : a <= windows.great ? 1 : a <= windows.good ? 2 : MISS;
       g.fillStyle = alpha(c.judge[j], 0.85);
       g.fillRect(b * bw + 0.5, h - padB - hh, Math.max(1, bw - 1), hh);
     }

@@ -9,7 +9,7 @@ It's a fully static site: no backend, no build step, no dependencies. Everything
 - **USB MIDI input** through the Web MIDI API. Note-on events from any kit, with per-pad muting and a velocity threshold to filter out crosstalk.
 - **Metronome mode** with any tempo and time signature, a count-in, a **speed trainer** (+N BPM every M bars) and a **gap trainer** (the click and the notes go silent for some bars, so you have to keep time on your own).
 - **Song mode with osu! beatmaps.** Drop an `.osz` file (or an `.osu` plus its audio). The app plays the song and follows every uninherited timing point (BPM, offset, meter). Hit objects are ignored. You can choose the start position and playback speed, and set a timing offset for each song.
-- **Rhythms:** quarters, halves, 8ths, off-beats, triplets, swing, 16ths, gallops, sextuplets, backbeat, son clave, or your own grid (for example `x..x..x.` in 16ths).
+- **Rhythm grids:** quarters, halves, 8ths, off-beats, triplets, swing, 16ths, gallops, sextuplets, backbeat, son clave, or your own grid (for example `x..x..x.` in 16ths).
 - **Feedback:** a scrolling note highway, an osu!-style hit-error meter, live accuracy / mean offset / consistency (σ and UR), a timing-over-time chart, and an end-of-session report broken down by subdivision and tempo.
 - **Latency calibration:** tap along to a click and the app measures your whole setup's offset (kit → USB → browser → speakers → ears).
 - Loaded songs are kept in your browser (IndexedDB), so you don't have to drop them again.
@@ -42,7 +42,7 @@ Web MIDI works in Chrome, Edge and Opera (desktop and Android). Firefox supports
 - MIDI and keyboard events carry `performance.now()` timestamps. `AudioContext.getOutputTimestamp()` maps those onto the audio timeline *as it is heard*, which corrects for the output latency the browser reports. The mapping is median-filtered every frame to remove jitter.
 - Whatever latency is left (USB polling, the kit's own processing, Bluetooth, the browser under-reporting) is covered by the **latency compensation** value, which you measure with the calibration.
 - **MP3 sync with osu!:** osu! decodes audio with BASS, which always skips the MP3 decoder delay (529 samples) and the encoder delay. Browsers only do that when the file has LAME gapless info, so files without it would play 12–25 ms late against the map. `js/mp3.js` counts the MP3 frames, works out from the decoded length what the browser trimmed, and shifts the map by the difference. Tested against BASS output on 40 real beatmaps: 39 match to the sample.
-- Each hit is matched to the nearest expected note within ±150 ms, or half the gap to the neighbouring note if that's smaller. Hits within 35 ms of each other count as one stroke, so a kick + crash or a flam isn't penalised. Notes whose window passes without a hit count as misses.
+- **The rhythm is a quantization grid.** Each stroke snaps to the nearest grid note and is judged by its distance to it. A stroke more than the *good* window away (60 ms at Normal) counts as a miss. Grid notes you don't play aren't counted at all, so an 8th-note grid lets you play quarters, 8ths or any mix of them. Off-grid misses lower your accuracy but are left out of the average offset and σ. Strokes within 35 ms of each other count as one, so a kick + crash or a flam isn't penalised. A second stroke on a grid note that was already played counts as *doubled*.
 
 ## Project layout
 

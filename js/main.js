@@ -104,7 +104,7 @@ function stroke(perfTime) {
   if (!session) return;
   const res = session.scorer.hit(songT - settings.latency * session.rate);
   if (!res) return;
-  if (res.type === 'hit') {
+  if (res.type === 'hit' || res.type === 'miss') {
     recent.push({ err: res.hit.err, j: res.hit.j, at: performance.now() });
     if (recent.length > 60) recent.shift();
     showFeedback(res.hit.j, res.hit.err);
@@ -242,11 +242,6 @@ function frame() {
   if (s) {
     const now = audio.audibleSongTime();
     s.now = now;
-    const missed = s.scorer.update(now - (settings.latency + 40) * s.rate);
-    if (missed.length) {
-      showFeedback(MISS, 0);
-      s.scatterDirty = true;
-    }
     timeline.draw(s);
     if (perfNow - s.lastUi > 100) { s.lastUi = perfNow; updateLive(s); }
     if (s.scatterDirty && perfNow - s.lastScatter > 250) drawScatter(s);
@@ -254,7 +249,7 @@ function frame() {
   }
 
   const windows = s?.windows || STRICTNESS[settings.strictness] || STRICTNESS.normal;
-  const last = recent.slice(-12);
+  const last = recent.filter(h => h.j !== MISS).slice(-12);
   errorMeter.draw({
     recent,
     windows,
@@ -290,7 +285,7 @@ function tendency(m) {
 function updateLive(s) {
   const st = s.scorer.stats();
   $('tAcc').textContent = st.accuracy == null ? '—' : `${(st.accuracy * 100).toFixed(1)}%`;
-  $('tAccSub').textContent = `${st.nHits} hit · ${st.counts[MISS]} missed`;
+  $('tAccSub').textContent = `${st.nHits} on the grid · ${st.counts[MISS]} off`;
   $('tMean').textContent = st.nHits ? fmtMs(st.mean) : '—';
   $('tMeanSub').textContent = st.nHits >= 4 ? `last 16: ${tendency(s.scorer.recentMean(16))}` : ' ';
   $('tSd').innerHTML = st.nHits > 1 ? `${st.sd.toFixed(1)}<small>ms</small>` : '—';
@@ -324,18 +319,14 @@ function resetLive() {
   for (const id of ['tAccSub', 'tMeanSub', 'tSdSub']) $(id).textContent = ' ';
   $('tStreak').textContent = '0';
   $('tStreakSub').textContent = 'best 0';
-  renderCounts({ counts: [0, 0, 0, 0, 0], extra: 0 });
+  renderCounts({ counts: [0, 0, 0, 0], extra: 0 });
 }
 
-const JUDGE_COLOR = ['var(--perfect)', 'var(--great)', 'var(--good)', 'var(--off)', 'var(--miss)'];
-let lastFeedback = 0;
+const JUDGE_COLOR = ['var(--perfect)', 'var(--great)', 'var(--good)', 'var(--miss)'];
 function showFeedback(j, err) {
   const el = $('feedback');
-  const now = performance.now();
-  if (j === MISS && now - lastFeedback < 250) return; // don't let a miss hide a fresh hit
-  lastFeedback = now;
   el.style.color = JUDGE_COLOR[j];
-  const detail = j === MISS ? '' : Math.abs(err) < 1 ? 'on time' : `${fmtMs(err)} ${err < 0 ? 'early' : 'late'}`;
+  const detail = Math.abs(err) < 1 ? 'on time' : `${fmtMs(err)} ${err < 0 ? 'early' : 'late'}`;
   el.innerHTML = `${JUDGMENTS[j]}<small>${detail || '&nbsp;'}</small>`;
   el.classList.remove('show');
   void el.offsetWidth; // restart the animation
@@ -375,15 +366,15 @@ function insightsFor(st, slotRows, tempoRows) {
   }
 
   const missRate = st.counts[MISS] / st.judged;
-  if (missRate > 0.1) out.push(`You missed ${(missRate * 100).toFixed(0)}% of the notes.`);
-  if (st.extra > Math.max(4, 0.1 * st.judged)) out.push(`You played ${st.extra} extra hits that didn't belong to any note. If a pad you aren't practicing with (like the hi-hat pedal) caused them, mute it in Settings.`);
+  if (missRate > 0.1) out.push(`${(missRate * 100).toFixed(0)}% of your strokes were more than ${STRICTNESS[settings.strictness].good} ms off the grid and counted as misses.`);
+  if (st.extra > Math.max(4, 0.1 * st.judged)) out.push(`${st.extra} strokes doubled up on a grid note that was already played. If a pad you aren't practicing with (like the hi-hat pedal) caused them, mute it in Settings. If you're playing faster notes on purpose, pick a finer rhythm grid.`);
   return out;
 }
 
 function breakdownTable(title, rows) {
   const cell = v => `<td class="${v < -2 ? 'early' : v > 2 ? 'late' : ''}">${fmtMs(v)}</td>`;
   return `<div><p class="cap">${title}</p><table class="breakdown">
-    <thead><tr><th></th><th>hits</th><th>missed</th><th>avg</th><th>σ</th></tr></thead>
+    <thead><tr><th></th><th>on grid</th><th>off</th><th>avg</th><th>σ</th></tr></thead>
     <tbody>${rows.map(r => `<tr><td>${escapeHtml(r.label)}</td><td>${r.n}</td><td>${r.misses}</td>${r.n ? cell(r.mean) : '<td>—</td>'}<td>${r.n > 1 ? `${r.sd.toFixed(1)} ms` : '—'}</td></tr>`).join('')}</tbody>
   </table></div>`;
 }
@@ -405,7 +396,7 @@ function showResults(s) {
       <div class="tile"><div class="tile-label">Accuracy</div><div class="tile-value">${acc}</div><div class="tile-sub">${st.counts[0]} perfect · ${st.counts[1]} great · ${st.counts[2]} good</div></div>
       <div class="tile"><div class="tile-label">Average offset</div><div class="tile-value">${st.nHits ? fmtMs(st.mean, 1) : '—'}</div><div class="tile-sub">${st.nHits ? tendency(st.mean) : ''}</div></div>
       <div class="tile"><div class="tile-label">Consistency <span class="nocase">(σ)</span></div><div class="tile-value">${st.nHits > 1 ? st.sd.toFixed(1) : '—'}<small>ms</small></div><div class="tile-sub">UR ${st.ur.toFixed(0)}</div></div>
-      <div class="tile"><div class="tile-label">Notes</div><div class="tile-value">${st.nHits}<small>/ ${st.judged}</small></div><div class="tile-sub">${st.counts[MISS]} missed · ${st.extra} extra · best streak ${st.maxStreak}</div></div>
+      <div class="tile"><div class="tile-label">Strokes</div><div class="tile-value">${st.nHits}<small>/ ${st.judged} on grid</small></div><div class="tile-sub">${st.counts[MISS]} off the grid · ${st.extra} doubled · best streak ${st.maxStreak}</div></div>
     </div>
     <div class="insights"><ul>${insightsFor(st, slotRows, tempoRows).map(t => `<li>${t}</li>`).join('')}</ul></div>
     <div class="res-charts">

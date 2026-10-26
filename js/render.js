@@ -1,0 +1,335 @@
+// Canvas views: scrolling timeline, hit-error meter, timing scatter plot and error histogram.
+import { lowerBound } from './util.js';
+import { MISS } from './scorer.js';
+
+const css = name => getComputedStyle(document.documentElement).getPropertyValue(name).trim();
+let C = null;
+function colors() {
+  if (!C) {
+    C = {
+      judge: ['--perfect', '--great', '--good', '--off', '--miss'].map(css),
+      extra: css('--extra'), text: css('--text'), muted: css('--muted'), faint: css('--faint'),
+      accent: css('--accent'), panel2: css('--panel-2'), border: css('--border'),
+    };
+  }
+  return C;
+}
+const alpha = (hex, a) => {
+  const n = parseInt(hex.slice(1), 16);
+  return `rgba(${n >> 16},${(n >> 8) & 255},${n & 255},${a})`;
+};
+
+class CanvasView {
+  constructor(canvas) {
+    this.canvas = canvas;
+    this.g = canvas.getContext('2d');
+    this.w = this.h = 0;
+    new ResizeObserver(() => this.resize()).observe(canvas);
+    this.resize();
+  }
+  resize() {
+    const dpr = window.devicePixelRatio || 1;
+    const r = this.canvas.getBoundingClientRect();
+    this.w = r.width; this.h = r.height;
+    this.canvas.width = Math.max(1, Math.round(r.width * dpr));
+    this.canvas.height = Math.max(1, Math.round(r.height * dpr));
+    this.g.setTransform(dpr, 0, 0, dpr, 0, 0);
+    // resizing clears the canvas, so repaint the last frame
+    if (this.last) this.draw(this.last);
+  }
+}
+
+// ---------------------------------------------------------------- timeline
+
+export class Timeline extends CanvasView {
+  constructor(canvas) {
+    super(canvas);
+    this.futureMs = 2200; // real ms visible ahead of the hit line
+    this.hitFrac = 0.22;
+  }
+
+  /**
+   * @param {object} s
+   *  now, rate, notes, beats, sections, scorer, hiddenBar(bar)→bool
+   */
+  draw(s) {
+    this.last = s;
+    const { g, w, h } = this, c = colors();
+    g.clearRect(0, 0, w, h);
+    if (!s) return;
+
+    const hitX = Math.round(w * this.hitFrac);
+    const pxPerMs = (w - hitX) / this.futureMs;
+    const toX = t => hitX + ((t - s.now) / s.rate) * pxPerMs;
+    const t0 = s.now - (hitX / pxPerMs) * s.rate - 50;
+    const t1 = s.now + ((w - hitX) / pxPerMs) * s.rate + 50;
+    const noteY = Math.round(h * 0.44), hitY = Math.round(h * 0.78);
+
+    // lanes
+    g.fillStyle = 'rgba(255,255,255,0.035)';
+    g.fillRect(0, noteY - 20, w, 40);
+    g.fillRect(0, hitY - 13, w, 26);
+
+    // silent bars (gap trainer)
+    if (s.hiddenBar) {
+      g.font = '600 11px system-ui'; g.textAlign = 'left';
+      for (let i = lowerBound(s.beats, t0 - 10000); i < s.beats.length && s.beats[i].t <= t1; i++) {
+        const b = s.beats[i];
+        if (b.downbeat && s.hiddenBar(b.bar)) {
+          const sec = s.sections[b.sec];
+          const x0 = toX(b.t), x1 = toX(Math.min(sec.end, b.t + sec.beatLength * sec.meter));
+          if (x1 < 0) continue;
+          g.fillStyle = alpha(c.accent, 0.07);
+          g.fillRect(x0, 0, x1 - x0, h);
+          g.fillStyle = alpha(c.accent, 0.7);
+          g.fillText('SILENT · keep going', Math.max(x0, 0) + 6, h - 8);
+        }
+      }
+    }
+
+    // beat grid
+    g.textAlign = 'left';
+    for (let i = lowerBound(s.beats, t0); i < s.beats.length && s.beats[i].t <= t1; i++) {
+      const b = s.beats[i], x = Math.round(toX(b.t)) + 0.5;
+      g.strokeStyle = b.downbeat ? 'rgba(255,255,255,0.22)' : 'rgba(255,255,255,0.08)';
+      g.lineWidth = b.downbeat ? 1.5 : 1;
+      g.beginPath(); g.moveTo(x, b.downbeat ? 18 : 26); g.lineTo(x, h - 4); g.stroke();
+      if (b.downbeat) {
+        g.fillStyle = c.faint; g.font = '11px system-ui';
+        g.fillText(String(b.bar + 1), x + 4, 30);
+      }
+    }
+
+    // tempo labels at section starts
+    g.font = '600 12px system-ui';
+    for (let i = 0; i < s.sections.length; i++) {
+      const sec = s.sections[i];
+      if (sec.start < t0 - 4000 || sec.start > t1) continue;
+      const prev = s.sections[i - 1];
+      const bpm = (60000 / sec.beatLength) * s.rate;
+      if (prev && Math.abs(prev.beatLength - sec.beatLength) < 0.01 && prev.meter === sec.meter) continue;
+      const x = Math.max(4, toX(sec.start) + 4);
+      g.fillStyle = c.accent;
+      g.fillText(`${+bpm.toFixed(1)} BPM${sec.meter !== 4 ? ` · ${sec.meter}/4` : ''}`, x, 14);
+    }
+
+    // notes
+    const sc = s.scorer;
+    for (let i = lowerBound(s.notes, t0); i < s.notes.length && s.notes[i].t <= t1; i++) {
+      const n = s.notes[i], x = toX(n.t), j = sc.judge[i];
+      const r = n.downbeat ? 9 : n.onBeat ? 7.5 : 6;
+      if (i < sc.first) {
+        g.strokeStyle = c.faint; g.lineWidth = 1.5;
+        g.beginPath(); g.arc(x, noteY, r - 1, 0, Math.PI * 2); g.stroke();
+        continue;
+      }
+      if (j === -1) {
+        if (s.hiddenBar?.(n.bar)) continue;
+        g.fillStyle = n.downbeat ? '#ffffff' : '#d9dde6';
+        g.beginPath(); g.arc(x, noteY, r, 0, Math.PI * 2); g.fill();
+      } else if (j === MISS) {
+        g.strokeStyle = c.judge[MISS]; g.lineWidth = 2;
+        g.beginPath();
+        g.moveTo(x - 5, noteY - 5); g.lineTo(x + 5, noteY + 5);
+        g.moveTo(x + 5, noteY - 5); g.lineTo(x - 5, noteY + 5);
+        g.stroke();
+      } else {
+        g.fillStyle = alpha(c.judge[j], 0.35);
+        g.strokeStyle = c.judge[j]; g.lineWidth = 2;
+        g.beginPath(); g.arc(x, noteY, r, 0, Math.PI * 2); g.fill(); g.stroke();
+      }
+    }
+
+    // hits and their offset links
+    for (let k = sc.hits.length - 1; k >= 0; k--) {
+      const hit = sc.hits[k];
+      if (hit.t < t0) break;
+      if (hit.t > t1) continue;
+      const x = toX(hit.t), nx = toX(s.notes[hit.i].t), col = c.judge[hit.j];
+      g.strokeStyle = alpha(col, 0.45); g.lineWidth = 1.5;
+      g.beginPath(); g.moveTo(nx, noteY + 10); g.lineTo(x, hitY - 11); g.stroke();
+      g.fillStyle = col;
+      g.fillRect(x - 1.5, hitY - 11, 3, 22);
+    }
+    for (let k = sc.extras.length - 1; k >= 0; k--) {
+      const e = sc.extras[k];
+      if (e.t < t0) break;
+      if (e.t > t1) continue;
+      const x = toX(e.t);
+      g.fillStyle = alpha(c.extra, 0.6);
+      g.fillRect(x - 1, hitY - 7, 2, 14);
+    }
+
+    // hit line
+    g.fillStyle = alpha(c.accent, 0.18);
+    g.fillRect(hitX - 6, 0, 12, h);
+    g.fillStyle = c.accent;
+    g.fillRect(hitX - 1, 0, 2, h);
+  }
+}
+
+// ---------------------------------------------------------------- error meter
+
+export class ErrorMeter extends CanvasView {
+  /** @param {{recent: {err:number, j:number, at:number}[], windows, mean:number|null, now:number}} s */
+  draw(s) {
+    this.last = s;
+    const { g, w, h } = this, c = colors();
+    g.clearRect(0, 0, w, h);
+    const range = s.windows.good * 1.6;
+    const toX = e => w / 2 + (Math.max(-range, Math.min(range, e)) / range) * (w / 2 - 6);
+    const cy = h / 2;
+
+    // zones, outermost first
+    const zones = [[range, 3], [s.windows.good, 2], [s.windows.great, 1], [s.windows.perfect, 0]];
+    for (const [r, j] of zones) {
+      g.fillStyle = alpha(c.judge[j], j === 3 ? 0.12 : 0.22);
+      g.fillRect(toX(-r), cy - 5, toX(r) - toX(-r), 10);
+    }
+    g.fillStyle = c.text;
+    g.fillRect(w / 2 - 1, cy - 14, 2, 28);
+
+    // tick labels
+    g.fillStyle = c.faint; g.font = '10px system-ui'; g.textAlign = 'center';
+    for (const v of [-s.windows.good, s.windows.good]) g.fillText(`${v > 0 ? '+' : '−'}${Math.abs(v)}`, toX(v), h - 2);
+
+    for (const hit of s.recent) {
+      const age = (s.now - hit.at) / 4000;
+      if (age >= 1) continue;
+      g.fillStyle = alpha(c.judge[hit.j], 1 - age);
+      g.fillRect(toX(hit.err) - 1.5, cy - 13, 3, 26);
+    }
+
+    if (s.mean != null) {
+      const x = toX(s.mean);
+      g.fillStyle = c.text;
+      g.beginPath(); g.moveTo(x, cy - 15); g.lineTo(x - 6, cy - 24); g.lineTo(x + 6, cy - 24); g.closePath(); g.fill();
+    }
+  }
+}
+
+// ---------------------------------------------------------------- scatter
+
+export class Scatter extends CanvasView {
+  /** @param {{hits, misses, notes, x0, x1, windows, sectionStarts?: number[]}} s */
+  draw(s) {
+    this.last = s;
+    const { g, w, h } = this, c = colors();
+    g.clearRect(0, 0, w, h);
+    const padL = 40, padR = 8, padT = 8, padB = 18;
+    const range = Math.ceil((s.windows.good * 1.6) / 10) * 10;
+    const pw = w - padL - padR, ph = h - padT - padB;
+    const span = Math.max(1, s.x1 - s.x0);
+    const toX = t => padL + ((t - s.x0) / span) * pw;
+    const toY = e => padT + ph / 2 - (Math.max(-range, Math.min(range, e)) / range) * (ph / 2);
+
+    // judgment bands
+    for (const [r, j] of [[s.windows.good, 2], [s.windows.great, 1], [s.windows.perfect, 0]]) {
+      g.fillStyle = alpha(c.judge[j], 0.07);
+      g.fillRect(padL, toY(r), pw, toY(-r) - toY(r));
+    }
+    // axes
+    g.strokeStyle = 'rgba(255,255,255,0.25)'; g.lineWidth = 1;
+    g.beginPath(); g.moveTo(padL, toY(0) + 0.5); g.lineTo(w - padR, toY(0) + 0.5); g.stroke();
+    g.fillStyle = c.faint; g.font = '10px system-ui'; g.textAlign = 'right';
+    for (const v of [-range, -range / 2, 0, range / 2, range]) {
+      g.fillText(v === 0 ? '0' : `${v > 0 ? '+' : '−'}${Math.abs(v)}`, padL - 6, toY(v) + 3);
+    }
+    g.save(); g.translate(10, padT + ph / 2); g.rotate(-Math.PI / 2); g.textAlign = 'center';
+    g.fillText('ms (early ↓ / late ↑)', 0, 0); g.restore();
+
+    if (s.sectionStarts) {
+      g.strokeStyle = alpha(c.accent, 0.35); g.setLineDash([3, 4]);
+      for (const t of s.sectionStarts) {
+        if (t <= s.x0 || t >= s.x1) continue;
+        const x = Math.round(toX(t)) + 0.5;
+        g.beginPath(); g.moveTo(x, padT); g.lineTo(x, padT + ph); g.stroke();
+      }
+      g.setLineDash([]);
+    }
+
+    // misses as ticks along the bottom
+    g.fillStyle = alpha(c.judge[MISS], 0.8);
+    for (const i of s.misses) {
+      const x = toX(s.notes[i].t);
+      g.fillRect(x - 0.75, h - padB + 4, 1.5, 6);
+    }
+
+    const r = s.hits.length > 1500 ? 1.4 : 2.2;
+    for (const hit of s.hits) {
+      g.fillStyle = alpha(c.judge[hit.j], 0.85);
+      g.beginPath(); g.arc(toX(hit.t), toY(hit.err), r, 0, Math.PI * 2); g.fill();
+    }
+
+    // moving average
+    const win = 16;
+    if (s.hits.length >= 4) {
+      g.strokeStyle = c.text; g.lineWidth = 1.75; g.beginPath();
+      let sum = 0;
+      s.hits.forEach((hit, k) => {
+        sum += hit.err;
+        if (k >= win) sum -= s.hits[k - win].err;
+        const n = Math.min(k + 1, win), x = toX(hit.t), y = toY(sum / n);
+        if (k === 0) g.moveTo(x, y); else g.lineTo(x, y);
+      });
+      g.stroke();
+    }
+  }
+}
+
+// ---------------------------------------------------------------- histogram
+
+export class Histogram extends CanvasView {
+  draw(s) {
+    this.last = s;
+    const { hits, windows, mean } = s;
+    const { g, w, h } = this, c = colors();
+    g.clearRect(0, 0, w, h);
+    const range = Math.ceil((windows.good * 1.6) / 10) * 10;
+    const bin = range > 80 ? 5 : 3;
+    const nb = Math.ceil((2 * range) / bin);
+    const counts = new Array(nb).fill(0);
+    for (const hit of hits) {
+      const b = Math.floor((Math.max(-range, Math.min(range - 0.001, hit.err)) + range) / bin);
+      counts[b]++;
+    }
+    const max = Math.max(1, ...counts);
+    const padB = 16, padT = 8, bw = w / nb;
+    for (let b = 0; b < nb; b++) {
+      const center = -range + (b + 0.5) * bin;
+      const hh = (counts[b] / max) * (h - padB - padT);
+      const a = Math.abs(center);
+      const j = a <= windows.perfect ? 0 : a <= windows.great ? 1 : a <= windows.good ? 2 : 3;
+      g.fillStyle = alpha(c.judge[j], 0.85);
+      g.fillRect(b * bw + 0.5, h - padB - hh, Math.max(1, bw - 1), hh);
+    }
+    g.fillStyle = c.text;
+    g.fillRect(w / 2 - 0.5, padT, 1, h - padB - padT);
+    if (mean != null) {
+      const x = w / 2 + (Math.max(-range, Math.min(range, mean)) / range) * (w / 2);
+      g.strokeStyle = c.accent; g.lineWidth = 2; g.setLineDash([4, 3]);
+      g.beginPath(); g.moveTo(x, padT); g.lineTo(x, h - padB); g.stroke(); g.setLineDash([]);
+    }
+    g.fillStyle = c.faint; g.font = '10px system-ui'; g.textAlign = 'center';
+    g.fillText(`−${range}`, 14, h - 3); g.fillText('0', w / 2, h - 3); g.fillText(`+${range}`, w - 14, h - 3);
+  }
+}
+
+/** Small strip used by the calibration dialog. */
+export function drawCalibStrip(canvas, errors) {
+  const dpr = window.devicePixelRatio || 1;
+  const r = canvas.getBoundingClientRect();
+  canvas.width = r.width * dpr; canvas.height = r.height * dpr;
+  const g = canvas.getContext('2d'); g.setTransform(dpr, 0, 0, dpr, 0, 0);
+  const w = r.width, h = r.height, c = colors(), range = 150;
+  g.clearRect(0, 0, w, h);
+  g.fillStyle = c.panel2; g.fillRect(0, h / 2 - 12, w, 24);
+  g.fillStyle = c.muted; g.fillRect(w / 2 - 1, h / 2 - 18, 2, 36);
+  g.font = '10px system-ui'; g.textAlign = 'center'; g.fillStyle = c.faint;
+  g.fillText('click', w / 2, h - 2); g.fillText(`−${range} ms`, 24, h - 2); g.fillText(`+${range} ms`, w - 26, h - 2);
+  errors.forEach((e, k) => {
+    const x = w / 2 + (Math.max(-range, Math.min(range, e)) / range) * (w / 2 - 4);
+    g.fillStyle = alpha(c.accent, 0.35 + 0.65 * ((k + 1) / errors.length));
+    g.fillRect(x - 1.5, h / 2 - 12, 3, 24);
+  });
+}

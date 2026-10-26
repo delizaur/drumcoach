@@ -28,6 +28,7 @@ export class Scorer {
     this.windows = windows;
     this.rate = rate;
     this.first = lowerBound(notes, scoreFrom);
+    this.hybrid = notes.some(x => x.primary === false); // grid with primary (e.g. 8th) and secondary (16th) notes
     this.judge = new Int8Array(notes.length).fill(-1); // best judgment among the strokes on each grid note
     this.claimed = new Set(); // "noteIndex|pad" pairs already played
     this.hits = [];     // strokes on the grid: { t, err, j, i, slot, sec, pad, lane }
@@ -65,6 +66,12 @@ export class Scorer {
       if (i + 1 !== this.first || t - n[i].t < n[this.first].t - t) return null;
       i = this.first;
     }
+    if (this.hybrid && !n[i].primary) {
+      // Prefer the coarser grid: snap to the nearest primary note if it's within its capture range,
+      // so a sloppy 8th isn't mistaken for a well-timed 16th.
+      const p = this.nearestPrimary(i, t);
+      if (p >= this.first && Math.abs(t - n[p].t) <= this.captureAt(p)) i = p;
+    }
 
     const errSong = t - n[i].t;
     const edge = (i === 0 && errSong < 0) || (i === n.length - 1 && errSong > 0);
@@ -96,6 +103,26 @@ export class Scorer {
     const hit = { t, err, j, i, slot: n[i].slot, sec: n[i].sec, pad, lane };
     this.hits.push(hit);
     return { type: 'hit', hit };
+  }
+
+  nearestPrimary(i, t) {
+    const n = this.notes;
+    let left = -1, right = -1;
+    for (let k = i - 1; k >= 0 && k >= i - 8; k--) if (n[k].primary) { left = k; break; }
+    for (let k = i + 1; k < n.length && k <= i + 8; k++) if (n[k].primary) { right = k; break; }
+    if (left < 0) return right;
+    if (right < 0) return left;
+    return t - n[left].t <= n[right].t - t ? left : right;
+  }
+
+  /** How far (song ms) from primary note p a stroke is still snapped to it in a hybrid grid. */
+  captureAt(p) {
+    const n = this.notes;
+    let gap = Infinity;
+    if (p > 0) gap = Math.min(gap, n[p].t - n[p - 1].t);
+    if (p + 1 < n.length) gap = Math.min(gap, n[p + 1].t - n[p].t);
+    // the good window, but always leave the secondary note a fair share of the space
+    return Math.min(this.windows.good * this.rate, 0.65 * gap);
   }
 
   stats() {

@@ -173,6 +173,7 @@ input[type=range] { width: 100%; accent-color: var(--accent); margin: 6px 0 2px;
 .pattern-preview .slot { width: 12px; height: 18px; border-radius: 3px; background: var(--raised); }
 .pattern-preview .slot.on { background: var(--accent); }
 .pattern-preview .slot.on.first { background: #c9c0ff; }
+.pattern-preview .slot.on.secondary { background: transparent; box-shadow: inset 0 0 0 1.5px var(--accent); }
 
 /* ---------- practice area ---------- */
 .practice { display: flex; flex-direction: column; gap: 14px; min-width: 0; }

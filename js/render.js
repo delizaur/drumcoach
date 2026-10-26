@@ -124,7 +124,7 @@ export class Timeline extends CanvasView {
     const sc = s.scorer;
     for (let i = lowerBound(s.notes, t0); i < s.notes.length && s.notes[i].t <= t1; i++) {
       const n = s.notes[i], x = toX(n.t), j = sc.judge[i];
-      const r = n.downbeat ? 7 : n.onBeat ? 6 : 4.5;
+      const r = n.downbeat ? 7 : n.onBeat ? 6 : n.primary === false ? 3 : 4.5; // hybrid: secondary notes are small
       if (!n.onBeat) { // faint guide through the lanes for subdivisions
         g.strokeStyle = 'rgba(255,255,255,0.04)'; g.lineWidth = 1;
         g.beginPath(); g.moveTo(Math.round(x) + 0.5, laneTop); g.lineTo(Math.round(x) + 0.5, laneBottom); g.stroke();

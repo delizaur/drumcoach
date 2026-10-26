@@ -26,7 +26,7 @@ const DEFAULTS = {
   trainerOn: false, trainerStep: 5, trainerBars: 4, trainerMax: 180,
   gapOn: false, gapPlay: 2, gapMute: 2,
   // shared
-  pattern: 'quarter', customSubdiv: 4, customGrid: 'x..x..x.',
+  pattern: 'hybrid-8-16', customSubdiv: 4, customGrid: 'x..x..x.',
   clickMode: 'beats', clickVolume: 0.7, strictness: 'normal',
   // song
   rate: 1, musicVolume: 0.85, songClick: false, lastSong: null, songPrefs: {},
@@ -824,7 +824,9 @@ function renderPattern() {
     beat.className = 'beat';
     for (let k = 0; k < p.subdiv && b * p.subdiv + k < p.grid.length; k++) {
       const slot = document.createElement('div');
-      slot.className = 'slot' + (p.grid[b * p.subdiv + k] === 'x' ? ' on' : '') + (k === 0 ? ' first' : '');
+      const idx = b * p.subdiv + k;
+      const hit = p.hits.find(h => h.slot === idx);
+      slot.className = 'slot' + (hit ? ' on' : '') + (hit && !hit.primary ? ' secondary' : '') + (k === 0 ? ' first' : '');
       beat.append(slot);
     }
     el.append(beat);

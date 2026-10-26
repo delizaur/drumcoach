@@ -122,6 +122,7 @@ input[type=range] { width: 100%; accent-color: var(--accent); margin: 6px 0 2px;
   padding: 18px 22px; max-width: 1500px; width: 100%; margin: 0 auto;
 }
 .panel { background: var(--panel); border: 1px solid var(--border); border-radius: var(--radius); }
+.setup.locked > [inert], .setup.locked [inert] { opacity: .5; }
 .setup { padding: 16px 18px; align-self: start; position: sticky; top: 76px; max-height: calc(100vh - 94px); overflow: auto; }
 
 .tabs { display: flex; gap: 4px; background: var(--bg); border: 1px solid var(--border); border-radius: 11px; padding: 4px; margin-bottom: 18px; }

@@ -169,7 +169,24 @@ function buildClicks(grid, mode, hiddenBar, from) {
   return events.filter(e => e.t >= from - 1);
 }
 
-async function startSession({ preview = false } = {}) {
+/**
+ * Locks the setup panel during a session so settings can't change mid-run. In a tempo preview the
+ * tempo controls stay usable, since adjusting them while listening is the point of the preview.
+ */
+function lockSetup(locked, keep = null) {
+  const setup = document.querySelector('.setup');
+  for (const el of setup.querySelectorAll('[inert]')) el.inert = false;
+  const walk = el => {
+    for (const child of el.children) {
+      if (keep && child.contains(keep)) { child.inert = false; if (child !== keep) walk(child); }
+      else child.inert = locked;
+    }
+  };
+  walk(setup);
+  setup.classList.toggle('locked', locked);
+}
+
+async function startSession({ preview = false, from = null } = {}) {
   if (session) return;
   if (settings.mode === 'song' && !song?.diff) return;
   await audio.init();
@@ -193,7 +210,7 @@ async function startSession({ preview = false } = {}) {
     }
     sections = songSections(song.diff.timing, endMs, totalSync());
     if (!sections.length) return showSongError('This difficulty has no timing points inside the audio.');
-    startPos = clamp(prefs.startAt, 0, Math.max(0, endMs - 3000));
+    startPos = clamp(from ?? prefs.startAt, 0, Math.max(0, endMs - 3000));
     const sec = sections[sectionAt(sections, startPos)];
     scoreFrom = startPos + Math.max(1000 * rate, 2 * sec.beatLength);
     if (preview) clickMode = settings.clickMode === 'off' ? 'beats' : settings.clickMode;
@@ -240,8 +257,7 @@ async function startSession({ preview = false } = {}) {
   $('startBtn').classList.replace('primary', 'stop');
   $('idleHint').hidden = true;
   $('progress').hidden = session.mode !== 'song';
-  document.querySelector('.setup').inert = true;
-  document.querySelector('.setup').style.opacity = 0.55;
+  lockSetup(true, preview ? $('tempoBox') : null);
 }
 
 function scheduleClicks() {
@@ -266,8 +282,7 @@ function stopSession(withResults) {
   $('startBtn').textContent = 'Start';
   $('startBtn').classList.replace('stop', 'primary');
   $('idleHint').hidden = false;
-  document.querySelector('.setup').inert = false;
-  document.querySelector('.setup').style.opacity = '';
+  lockSetup(false);
   updateStartButton();
 
   drawScatter(s, true);
@@ -718,6 +733,12 @@ function changeTempo(fn) {
   applyTempo(song, prefs);
   save();
   renderSongInfo();
+  if (session?.preview) {
+    // restart the preview with the new grid, a second before where it was, to hear the change
+    const from = Math.max(0, session.now - 1000);
+    stopSession(false);
+    startSession({ preview: true, from });
+  }
 }
 
 /** The automatic part of the sync: detected, typical fallback, or nothing when auto-sync is off. */

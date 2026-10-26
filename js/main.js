@@ -2,6 +2,7 @@ import { AudioEngine } from './audio.js';
 import { MidiInput, drumName } from './midi.js';
 import { readZip } from './zip.js';
 import { loadBeatmapSet, songKey, tempoSummary } from './osu.js';
+import { decoderOffsetMs } from './mp3.js';
 import { PATTERNS, makePattern, songSections, metronomeSections, buildGrid, sectionAt } from './timing.js';
 import { Scorer, STRICTNESS, JUDGMENTS, MISS } from './scorer.js';
 import { Timeline, ErrorMeter, Scatter, Histogram, drawCalibStrip } from './render.js';
@@ -149,7 +150,7 @@ async function startSession() {
     rate = settings.rate;
     buffer = song.buffer;
     endMs = song.durationMs;
-    sections = songSections(song.diff.timing, endMs, prefs.offset);
+    sections = songSections(song.diff.timing, endMs, prefs.offset + song.decoderOffset);
     if (!sections.length) return showSongError('This difficulty has no timing points inside the audio.');
     startPos = clamp(prefs.startAt, 0, Math.max(0, endMs - 3000));
     const sec = sections[sectionAt(sections, startPos)];
@@ -471,7 +472,7 @@ async function loadSong(files, { fromLibrary = false } = {}) {
     const fallbackAudio = diffs.find(d => d.audioEntry).audioEntry;
     for (const d of diffs) d.audioEntry ||= fallbackAudio;
 
-    const next = { key: songKey(diffs[0]), diffs, diff: null, diffIndex: -1, buffer: null, audioName: null, durationMs: 0, bgName: null, bgUrl: null };
+    const next = { key: songKey(diffs[0]), diffs, diff: null, diffIndex: -1, buffer: null, audioName: null, durationMs: 0, decoderOffset: 0, bgName: null, bgUrl: null };
     const prefs = settings.songPrefs[next.key];
     await selectDifficulty(next, prefs && prefs.diff < diffs.length ? prefs.diff : 0);
     if (song?.bgUrl) URL.revokeObjectURL(song.bgUrl);
@@ -498,8 +499,11 @@ async function loadSong(files, { fromLibrary = false } = {}) {
 async function selectDifficulty(target, index) {
   const d = target.diffs[index];
   if (target.audioName !== d.audioEntry.name) {
-    target.buffer = await audio.decode(await d.audioEntry.bytes());
+    const bytes = await d.audioEntry.bytes();
+    target.buffer = await audio.decode(bytes);
     target.audioName = d.audioEntry.name;
+    // match osu!'s MP3 decoder so the map's timing lines up with the audio
+    target.decoderOffset = /\.mp3$/i.test(d.audioEntry.name) ? decoderOffsetMs(bytes, target.buffer.duration) : 0;
     target.durationMs = target.buffer.duration * 1000;
   }
   const bgName = d.bgEntry?.name || null;
@@ -541,7 +545,11 @@ function renderSongInfo() {
     t.min === t.max ? `${bpm(t.main)} BPM` : `${bpm(t.min)}–${bpm(t.max)} BPM (mostly ${bpm(t.main)})`,
     t.changes ? `${t.changes} timing change${t.changes > 1 ? 's' : ''}` : 'constant tempo',
     fmtTime(song.durationMs),
+    ...(Math.abs(song.decoderOffset) >= 0.5 ? [`MP3 sync ${fmtMs(song.decoderOffset)}`] : []),
   ].join(' · ');
+  $('songMeta').title = song.decoderOffset
+    ? "This MP3 decodes slightly differently in the browser than in osu!. The beats are shifted automatically to compensate."
+    : '';
 
   const sel = $('diffSelect');
   sel.innerHTML = song.diffs.map((x, i) => `<option value="${i}">${escapeHtml(x.version)}</option>`).join('');

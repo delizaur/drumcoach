@@ -41,6 +41,7 @@ Web MIDI works in Chrome, Edge and Opera (desktop and Android). Firefox supports
 - The `AudioContext` is the master clock. Music and clicks are scheduled on it with sample accuracy.
 - MIDI and keyboard events carry `performance.now()` timestamps. `AudioContext.getOutputTimestamp()` maps those onto the audio timeline *as it is heard*, which corrects for the output latency the browser reports. The mapping is median-filtered every frame to remove jitter.
 - Whatever latency is left (USB polling, the kit's own processing, Bluetooth, the browser under-reporting) is covered by the **latency compensation** value, which you measure with the calibration.
+- **MP3 sync with osu!:** osu! decodes audio with BASS, which always skips the MP3 decoder delay (529 samples) and the encoder delay. Browsers only do that when the file has LAME gapless info, so files without it would play 12–25 ms late against the map. `js/mp3.js` counts the MP3 frames, works out from the decoded length what the browser trimmed, and shifts the map by the difference. Tested against BASS output on 40 real beatmaps: 39 match to the sample.
 - Each hit is matched to the nearest expected note within ±150 ms, or half the gap to the neighbouring note if that's smaller. Hits within 35 ms of each other count as one stroke, so a kick + crash or a flam isn't penalised. Notes whose window passes without a hit count as misses.
 
 ## Project layout
@@ -53,6 +54,7 @@ js/audio.js       AudioContext clock, music playback, metronome clicks
 js/midi.js        Web MIDI input
 js/zip.js         minimal .osz (zip) reader using DecompressionStream
 js/osu.js         .osu parsing (metadata, red-line timing points)
+js/mp3.js         MP3 frame/LAME-tag parsing for decoder-delay compensation
 js/timing.js      tempo sections, rhythm patterns, expected-note grid
 js/scorer.js      hit matching, judgments, statistics
 js/render.js      canvas views (timeline, error meter, charts)

@@ -7,6 +7,7 @@ It's a fully static site: no backend, no build step, no dependencies. Everything
 ## Features
 
 - **USB MIDI input** through the Web MIDI API. Note-on events from any kit, with per-pad muting and a velocity threshold to filter out crosstalk.
+- **Drum sounds:** pads trigger a kit synthesized in the browser (kick, snare, rimshot, side stick, toms, hi-hat with pedal choke, crash, splash, china, ride, bell), mapped from General MIDI notes and following velocity. You can switch it off in Settings if you monitor through your kit's module.
 - **Metronome mode** with any tempo and time signature, a count-in, a **speed trainer** (+N BPM every M bars) and a **gap trainer** (the click and the notes go silent for some bars, so you have to keep time on your own).
 - **Song mode with osu! beatmaps.** Drop an `.osz` file, an unpacked beatmap folder (or several, even your whole osu! `Songs` folder), or an `.osu` plus its audio. The app plays the song and follows every uninherited timing point (BPM, offset, meter). Hit objects are ignored. You can choose the start position and playback speed, and set a timing offset for each song.
 - **Rhythm grids:** quarters, halves, 8ths, off-beats, triplets, swing, 16ths, gallops, sextuplets, backbeat, son clave, or your own grid (for example `x..x..x.` in 16ths).
@@ -52,6 +53,7 @@ css/style.css     styles
 js/main.js        app wiring, UI, session lifecycle
 js/audio.js       AudioContext clock, music playback, metronome clicks
 js/midi.js        Web MIDI input
+js/drums.js       synthesized drum kit for pad sounds
 js/zip.js         minimal .osz (zip) reader using DecompressionStream
 js/osu.js         .osu parsing (metadata, red-line timing points)
 js/mp3.js         MP3 frame/LAME-tag parsing for decoder-delay compensation

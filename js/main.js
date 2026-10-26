@@ -7,6 +7,7 @@ import { PATTERNS, makePattern, songSections, metronomeSections, buildGrid, sect
 import { Scorer, STRICTNESS, JUDGMENTS, MISS } from './scorer.js';
 import { Timeline, ErrorMeter, Scatter, Histogram, drawCalibStrip } from './render.js';
 import { Calibration } from './calibration.js';
+import { DrumKit } from './drums.js';
 import { library } from './library.js';
 import { lowerBound, clamp, fmtTime, fmtMs, escapeHtml, basename } from './util.js';
 
@@ -19,6 +20,7 @@ const DEFAULTS = {
   mode: 'metronome',
   // input
   midiInput: 'all', minVelocity: 8, mutedNotes: [], seenPads: [], keyboard: true, latency: 0,
+  padSounds: true, padVolume: 0.8,
   // metronome
   bpm: 100, meter: 4, countIn: 1,
   trainerOn: false, trainerStep: 5, trainerBars: 4, trainerMax: 180,
@@ -76,8 +78,23 @@ function onMidiNote(ev) {
   flashTimer = setTimeout(() => chip.classList.remove('flash'), 70);
   notePad(ev);
 
-  if (ev.velocity < settings.minVelocity || settings.mutedNotes.includes(ev.note)) return;
+  if (ev.velocity < settings.minVelocity) return;
+  playPad(ev.note, ev.velocity); // muted pads still sound, they just aren't scored
+  if (settings.mutedNotes.includes(ev.note)) return;
   stroke(ev.time);
+}
+
+let kit = null;
+function playPad(note, velocity) {
+  if (!settings.padSounds || audio.ctx?.state !== 'running') return;
+  kit ||= new DrumKit(audio.ctx);
+  kit.volume = settings.padVolume;
+  kit.play(note, velocity);
+}
+
+// Browsers only allow audio after a user gesture, and MIDI input doesn't count as one.
+for (const type of ['pointerdown', 'keydown']) {
+  window.addEventListener(type, () => { audio.init().catch(() => {}); }, { once: true, capture: true });
 }
 
 const HIT_KEYS = new Set([' ', 'f', 'j', 'd', 'k']);
@@ -90,7 +107,9 @@ window.addEventListener('keydown', e => {
   if (!settings.keyboard || e.ctrlKey || e.metaKey || e.altKey || isTyping(e.target)) return;
   if (!HIT_KEYS.has(e.key.toLowerCase()) || !(session || calib?.active)) return;
   e.preventDefault();
-  if (!e.repeat) stroke(e.timeStamp || performance.now());
+  if (e.repeat) return;
+  playPad(38, 100);
+  stroke(e.timeStamp || performance.now());
 });
 window.addEventListener('keyup', e => {
   if (e.key === ' ' && (session || calib?.active) && !isTyping(e.target)) e.preventDefault();
@@ -879,6 +898,8 @@ function notePad(ev) {
 bind('minVelocity', 'minVelocity', { after: v => { $('minVelocityLabel').textContent = v; } });
 $('minVelocityLabel').textContent = settings.minVelocity;
 bind('keyboardOn', 'keyboard', { event: 'change' });
+bind('padSounds', 'padSounds', { event: 'change' });
+bind('padVolume', 'padVolume', { after: v => { if (kit) kit.volume = v; } });
 
 function setLatency(v) {
   settings.latency = clamp(Math.round(v), -300, 600);

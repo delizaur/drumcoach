@@ -21,7 +21,7 @@ const DEFAULTS = {
   mode: 'metronome',
   // input
   midiInput: 'all', minVelocity: 8, mutedNotes: [], seenPads: [], keyboard: true, latency: 0,
-  padSounds: true, padVolume: 0.8,
+  padSounds: false, keySounds: true, padVolume: 0.8, // kits usually have their own sounds; the keyboard doesn't
   // metronome
   bpm: 100, meter: 4, countIn: 1,
   trainerOn: false, trainerStep: 5, trainerBars: 4, trainerMax: 180,
@@ -99,8 +99,8 @@ function onMidiNote(ev) {
 }
 
 let kit = null;
-function playPad(note, velocity) {
-  if (!settings.padSounds || audio.ctx?.state !== 'running') return;
+function playPad(note, velocity, { keyboard = false } = {}) {
+  if (!(keyboard ? settings.keySounds : settings.padSounds) || audio.ctx?.state !== 'running') return;
   kit ||= new DrumKit(audio.ctx);
   kit.volume = settings.padVolume;
   kit.play(note, velocity);
@@ -124,7 +124,7 @@ window.addEventListener('keydown', e => {
   if (!note || !(session || calib?.active)) return;
   e.preventDefault();
   if (e.repeat) return;
-  playPad(note, 100);
+  playPad(note, 100, { keyboard: true });
   stroke(e.timeStamp || performance.now(), note);
 });
 window.addEventListener('keyup', e => {
@@ -809,7 +809,8 @@ function renderSongInfo() {
   const sel = $('diffSelect');
   sel.innerHTML = song.diffs.map((x, i) => `<option value="${i}">${escapeHtml(x.version)}</option>`).join('');
   sel.value = song.diffIndex;
-  $('diffField').hidden = song.diffs.length < 2;
+  // Difficulties almost always share their timing, so the picker stays hidden; the first one is used.
+  $('diffField').hidden = true;
 
   const startAt = $('startAt');
   startAt.max = Math.max(0, Math.floor((song.durationMs - 3000) / 100) * 100);
@@ -951,6 +952,7 @@ function setMode(mode) {
   document.querySelectorAll('.tab').forEach(t => t.setAttribute('aria-selected', String(t.dataset.mode === mode)));
   $('metronomePane').hidden = mode !== 'metronome';
   $('songPane').hidden = mode !== 'song';
+  syncClickControls();
   renderSongInfo();
   updateStartButton();
 }
@@ -1010,7 +1012,11 @@ bind('rate', 'rate', { after: v => { $('rateLabel').textContent = `${v.toFixed(2
 $('rateLabel').textContent = `${settings.rate.toFixed(2)}×`;
 bind('musicVolume', 'musicVolume', { after: v => audio.setMusicVolume(v) });
 bind('clickVolume', 'clickVolume', { after: v => audio.setClickVolume(v) });
-bind('songClick', 'songClick', { event: 'change' });
+bind('songClick', 'songClick', { event: 'change', after: syncClickControls });
+/** Click type and volume only matter in song mode when the click track is on. */
+function syncClickControls() {
+  $('clickRow').hidden = settings.mode === 'song' && !settings.songClick;
+}
 bind('clickMode', 'clickMode', { parse: String, event: 'change' });
 
 const patternSel = $('pattern');
@@ -1127,6 +1133,7 @@ bind('minVelocity', 'minVelocity', { after: v => { $('minVelocityLabel').textCon
 $('minVelocityLabel').textContent = settings.minVelocity;
 bind('keyboardOn', 'keyboard', { event: 'change' });
 bind('padSounds', 'padSounds', { event: 'change' });
+bind('keySounds', 'keySounds', { event: 'change' });
 bind('autoSyncOn', 'autoSync', { event: 'change', after: () => { if (song?.diff) renderSync(); } });
 function setFineTune(v) {
   settings.syncFineTune = clamp(Math.round(v), -60, 60);

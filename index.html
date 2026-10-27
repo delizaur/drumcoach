@@ -129,9 +129,8 @@
           </div>
           <div class="field">
             <div class="song-sync" id="songSync"></div>
-            <label for="songOffset">Your adjustment for this song <output id="songOffsetLabel">0 ms</output></label>
+            <label for="songOffset">Your adjustment for this song <span class="info" tabindex="0" role="button" aria-label="More info">i<span class="tip" role="tooltip">Added on top of the auto-sync and saved per song. Use it if this song's beats still feel early or late (+ moves the beats later).</span></span> <output id="songOffsetLabel">0 ms</output></label>
             <input id="songOffset" type="range" min="-120" max="120" step="1">
-            <small>Added on top of the auto-sync and saved per song. Use it if this map's beats still feel early or late (+ moves the beats later).</small>
           </div>
           <div class="field">
             <label for="musicVolume">Music volume</label>
@@ -150,9 +149,8 @@
       <!-- Shared options -->
       <section class="pane">
         <div class="field">
-          <label for="pattern">Rhythm grid</label>
+          <label for="pattern">Rhythm grid <span class="info" tabindex="0" role="button" aria-label="More info">i<span class="tip" role="tooltip">Each stroke snaps to the nearest note of this grid. You don't have to play every note: an 8th-note grid also lets you play quarters, or any mix of the two. <b>Hybrid</b> grids snap to the coarser notes (filled) when you're within the good window, and only use the finer ones (outlined) otherwise, so loose 8ths aren't mistaken for 16ths.</span></span></label>
           <select id="pattern"></select>
-          <small>Each stroke snaps to the nearest note of this grid. You don't have to play every note: an 8th-note grid also lets you play quarters, or any mix of the two. <b>Hybrid</b> grids snap to the coarser notes (filled) when you're within the good window, and only use the finer ones (outlined) otherwise, so loose 8ths aren't mistaken for 16ths.</small>
         </div>
         <div class="field" id="customField" hidden>
           <label for="customGrid">Custom pattern</label>
@@ -170,7 +168,7 @@
           <small>One character per subdivision: <code>x</code> = hit, <code>.</code> = rest. The pattern repeats from each tempo change.</small>
         </div>
         <div class="pattern-preview" id="patternPreview" aria-hidden="true"></div>
-        <div class="field-row">
+        <div class="field-row" id="clickRow">
           <div class="field">
             <label for="clickMode">Click</label>
             <select id="clickMode">
@@ -185,13 +183,12 @@
           </div>
         </div>
         <div class="field">
-          <label>Strictness</label>
+          <label>Strictness <span class="info up" tabindex="0" role="button" aria-label="More info">i<span class="tip" role="tooltip" id="windowsHint"></span></span></label>
           <div class="seg" id="strictness" role="radiogroup">
             <button data-value="relaxed" role="radio">Relaxed</button>
             <button data-value="normal" role="radio">Normal</button>
             <button data-value="strict" role="radio">Strict</button>
           </div>
-          <small id="windowsHint"></small>
         </div>
       </section>
     </aside>
@@ -274,6 +271,7 @@
 
       <h3>Drum sounds</h3>
       <label class="switch"><input type="checkbox" id="padSounds"><span class="track"></span>Play drum sounds when you hit a pad</label>
+      <label class="switch"><input type="checkbox" id="keySounds"><span class="track"></span>Play drum sounds for keyboard input</label>
       <div class="field">
         <label for="padVolume">Drum sound volume</label>
         <input id="padVolume" type="range" min="0" max="1" step="0.01">

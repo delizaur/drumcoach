@@ -114,36 +114,38 @@
             <button class="btn" id="tempoPreview" type="button">▶ Preview with click</button>
             <small>Detection works for songs with a steady tempo. Listen to the preview: if the click doesn't sit on the beat, try the other options or shift by half a beat.</small>
           </div>
-          <div class="field" id="diffField">
-            <label for="diffSelect">Difficulty (timing source)</label>
-            <select id="diffSelect"></select>
-          </div>
-          <div class="field">
-            <label for="startAt">Start at <output id="startAtLabel">0:00</output></label>
-            <input id="startAt" type="range" min="0" max="1000" step="100" value="0">
-          </div>
-          <div class="field">
-            <label for="rate">Speed <output id="rateLabel">1.00×</output></label>
-            <input id="rate" type="range" min="0.5" max="1.5" step="0.05">
-            <small>Slowing down also lowers the pitch.</small>
-          </div>
-          <div class="field">
-            <div class="song-sync" id="songSync"></div>
-            <label for="songOffset">Your adjustment for this song <span class="info" tabindex="0" role="button" aria-label="More info">i<span class="tip" role="tooltip">Added on top of the auto-sync and saved per song. Use it if this song's beats still feel early or late (+ moves the beats later).</span></span> <output id="songOffsetLabel">0 ms</output></label>
-            <input id="songOffset" type="range" min="-120" max="120" step="1">
-          </div>
-          <div class="field">
-            <label for="musicVolume">Music volume</label>
-            <input id="musicVolume" type="range" min="0" max="1" step="0.01">
-          </div>
-          <label class="switch"><input type="checkbox" id="songClick"><span class="track"></span>Click track over the song</label>
         </div>
       </section>
 
-      <hr>
-
-      <!-- Shared options -->
-      <section class="pane">
+      <!-- Everything about how you play along, in one collapsible group -->
+      <details class="group" id="playalongGroup" open>
+        <summary>Playalong settings</summary>
+        <div id="songSettings" hidden>
+            <div class="field" id="diffField">
+              <label for="diffSelect">Difficulty (timing source)</label>
+              <select id="diffSelect"></select>
+            </div>
+            <div class="field">
+              <label for="startAt">Start at <output id="startAtLabel">0:00</output></label>
+              <input id="startAt" type="range" min="0" max="1000" step="100" value="0">
+            </div>
+            <div class="field">
+              <label for="rate">Speed <output id="rateLabel">1.00×</output></label>
+              <input id="rate" type="range" min="0.5" max="1.5" step="0.05">
+              <small>Slowing down also lowers the pitch.</small>
+            </div>
+            <div class="field">
+              <div class="song-sync" id="songSync"></div>
+              <label for="songOffset">Your adjustment for this song <span class="info" tabindex="0" role="button" aria-label="More info">i<span class="tip" role="tooltip">Added on top of the auto-sync and saved per song. Use it if this song's beats still feel early or late (+ moves the beats later).</span></span> <output id="songOffsetLabel">0 ms</output></label>
+              <input id="songOffset" type="range" min="-120" max="120" step="1">
+            </div>
+            <div class="field">
+              <label for="musicVolume">Music volume</label>
+              <input id="musicVolume" type="range" min="0" max="1" step="0.01">
+            </div>
+            <label class="switch"><input type="checkbox" id="songClick"><span class="track"></span>Click track over the song</label>
+        </div>
+        <section class="pane">
         <div class="field">
           <label for="pattern">Rhythm grid <span class="info" tabindex="0" role="button" aria-label="More info">i<span class="tip" role="tooltip">Each stroke snaps to the nearest note of this grid. You don't have to play every note: an 8th-note grid also lets you play quarters, or any mix of the two. <b>Hybrid</b> grids snap to the coarser notes (filled) when you're within the good window, and only use the finer ones (outlined) otherwise, so loose 8ths aren't mistaken for 16ths.</span></span></label>
           <select id="pattern"></select>
@@ -187,13 +189,14 @@
           </div>
         </div>
       </section>
+      </details>
 
-      <!-- Song library: song mode only, after the shared settings -->
+      <!-- Song library: song mode only -->
       <section id="libraryPane" class="pane" hidden>
-        <div class="library" id="libraryBox" hidden>
-          <h3>Your songs</h3>
+        <details class="group library" id="libraryBox" open hidden>
+          <summary>Your songs</summary>
           <ul id="libraryList"></ul>
-        </div>
+        </details>
       </section>
     </aside>
 

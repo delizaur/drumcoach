@@ -32,6 +32,7 @@ const DEFAULTS = {
   // song
   rate: 1, musicVolume: 0.85, songClick: false, lastSong: null, songPrefs: {},
   autoSync: true, syncFineTune: 0, syncMigrated: false,
+  openGroups: { playalongGroup: true, libraryBox: true }, // collapsible panel sections
 };
 
 const settings = (() => {
@@ -782,6 +783,7 @@ const fileItems = files => [...files].map(f => ({ file: f, path: f.webkitRelativ
 function renderSongInfo() {
   const has = !!song?.diff;
   $('songInfo').hidden = !has;
+  $('songSettings').hidden = !has || settings.mode !== 'song';
   $('dropZone').classList.toggle('compact', has);
   $('dropZone').querySelector('strong').textContent = has ? 'Add songs' : 'Drop an osu! beatmap (.osz)';
   const bgCss = has && song.bgUrl ? `url("${song.bgUrl}")` : '';
@@ -1015,6 +1017,13 @@ bind('musicVolume', 'musicVolume', { after: v => audio.setMusicVolume(v) });
 bind('clickVolume', 'clickVolume', { after: v => audio.setClickVolume(v) });
 bind('songClick', 'songClick', { event: 'change', after: syncClickControls });
 /** Click type and volume only matter in song mode when the click track is on. */
+// Collapsible sections remember whether they were open.
+for (const id of ['playalongGroup', 'libraryBox']) {
+  const el = $(id);
+  el.open = settings.openGroups?.[id] ?? true;
+  el.addEventListener('toggle', () => { settings.openGroups = { ...settings.openGroups, [id]: el.open }; save(); });
+}
+
 function syncClickControls() {
   $('clickRow').hidden = settings.mode === 'song' && !settings.songClick;
 }

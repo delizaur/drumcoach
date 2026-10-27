@@ -799,8 +799,7 @@ function renderSongInfo() {
   const has = !!song?.diff;
   $('songInfo').hidden = !has;
   $('songSettings').hidden = !has || settings.mode !== 'song';
-  $('dropZone').classList.toggle('compact', has);
-  $('dropZone').querySelector('strong').textContent = has ? 'Add songs' : 'Drop an osu! beatmap (.osz)';
+  $('dropZone').querySelector('strong').textContent = 'Add songs';
   const bgCss = has && song.bgUrl ? `url("${song.bgUrl}")` : '';
   $('songBg').style.backgroundImage = bgCss;
   $('stageBg').style.backgroundImage = settings.mode === 'song' ? bgCss : '';
@@ -905,11 +904,11 @@ async function renderLibrary() {
 }
 
 const drop = $('dropZone');
-$('browseBtn').onclick = e => { e.stopPropagation(); $('fileInput').click(); };
-drop.onclick = () => $('fileInput').click();
-drop.onkeydown = e => { if (e.key === 'Enter') $('fileInput').click(); };
+$('addSongsBtn').onclick = () => $('addDialog').showModal();
+$('addClose').onclick = () => $('addDialog').close();
+$('browseBtn').onclick = () => { $('addDialog').close(); $('fileInput').click(); };
+$('folderBtn').onclick = () => { $('addDialog').close(); $('folderInput').click(); };
 $('fileInput').onchange = e => { handleItems(fileItems(e.target.files)); e.target.value = ''; };
-$('folderBtn').onclick = e => { e.stopPropagation(); $('folderInput').click(); };
 $('folderInput').onchange = e => { handleItems(fileItems(e.target.files)); e.target.value = ''; };
 drop.addEventListener('dragover', e => { e.preventDefault(); drop.classList.add('over'); });
 drop.addEventListener('dragleave', () => drop.classList.remove('over'));

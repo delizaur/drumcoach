@@ -76,13 +76,11 @@
 
       <!-- Song mode -->
       <section id="songPane" class="pane" hidden>
-        <div id="dropZone" class="drop" tabindex="0">
-          <strong>Drop an osu! beatmap (.osz)</strong>
-          <span>or a beatmap folder, or several (your whole Songs folder works too) · or any audio file, and the tempo is detected</span>
-          <div class="drop-buttons">
-            <button class="btn" id="browseBtn" type="button">Choose files…</button>
-            <button class="btn" id="folderBtn" type="button">Choose folder…</button>
-          </div>
+        <div id="dropZone" class="drop">
+          <button class="btn primary big add-btn" id="addSongsBtn" type="button">
+            <svg viewBox="0 0 24 24" aria-hidden="true"><path d="M12 5v14M5 12h14"/></svg>
+            <strong>Add songs</strong>
+          </button>
           <input type="file" id="fileInput" multiple hidden accept=".osz,.osu,.zip,.mp3,.ogg,.wav,.m4a,.flac,audio/*">
           <input type="file" id="folderInput" webkitdirectory hidden>
         </div>
@@ -349,6 +347,33 @@
   </dialog>
 
   <!-- Results -->
+  <!-- Add songs -->
+  <dialog id="addDialog" class="dialog mid">
+    <div class="dialog-inner">
+      <header class="dialog-head"><h2>Add songs</h2><button class="btn icon" id="addClose" type="button" aria-label="Close">✕</button></header>
+      <div class="add-options">
+        <section class="add-option">
+          <h4>Any audio file</h4>
+          <p class="hint">MP3, OGG, WAV, …</p>
+          <p>DrumCoach works out the tempo for you. This works best for songs with a constant tempo. Preview the song with the click track, and if the beat feels off, pick another tempo option or shift the beat until it fits.</p>
+        </section>
+        <section class="add-option">
+          <h4>osu! beatmaps</h4>
+          <p class="hint">.osz files or unpacked beatmap folders</p>
+          <p>Beatmaps come with hand-made timing, so they're more accurate and follow tempo changes, which makes them ideal for more complex songs. Browse them at <a href="https://osu.ppy.sh/beatmapsets" target="_blank" rel="noopener">osu.ppy.sh/beatmapsets</a> or on the mirror <a href="https://beatconnect.io/?sort=ranked_date" target="_blank" rel="noopener">beatconnect.io</a>. Add the downloaded .osz files, or beatmap folders straight from your osu! Songs folder.</p>
+        </section>
+      </div>
+      <ul class="add-notes">
+        <li>Every song you add is saved to your library in this browser, and it stays there when you leave the page.</li>
+        <li>You can also drag and drop files or folders anywhere on the page, and add as many at once as you like.</li>
+      </ul>
+      <div class="dialog-actions">
+        <button class="btn primary" id="browseBtn" type="button">Choose files…</button>
+        <button class="btn" id="folderBtn" type="button">Choose folder…</button>
+      </div>
+    </div>
+  </dialog>
+
   <dialog id="resultsDialog" class="dialog wide">
     <div class="dialog-inner">
       <header class="dialog-head"><h2 id="resultsTitle">Results</h2><button class="btn icon" id="resultsClose" aria-label="Close">✕</button></header>

@@ -85,7 +85,11 @@ export function metronomeSections({ bpm, meter, countIn = 0, trainer = null, dur
  * Expands sections + pattern into sorted lists of beats (for clicks and grid lines)
  * and notes (what the player should hit).
  */
-export function buildGrid(sections, pattern) {
+/**
+ * @param {{start:number, end:number}[]} [opts.tripletBeats] beats (song ms) whose subdivisions are
+ *   replaced by triplets, e.g. drum fills found in a beatmap
+ */
+export function buildGrid(sections, pattern, { tripletBeats = [] } = {}) {
   const EPS = 1; // ms; ignore beats that fall right on a section's end
   const beats = [], notes = [];
   let bar0 = 0;
@@ -125,8 +129,31 @@ export function buildGrid(sections, pattern) {
     }
     bar0 += Math.max(1, Math.ceil((s.end - s.start - EPS) / barMs));
   });
-  return { beats, notes };
+  if (!tripletBeats.length) return { beats, notes };
+
+  // In triplet beats, keep (or add) the note on the beat and replace everything in between with
+  // the two triplet positions. All of them are primary notes, so hybrid snapping doesn't apply there.
+  const inside = t => tripletBeats.some(b => t > b.start + EPS && t < b.end - EPS);
+  const out = notes.filter(n => !inside(n.t));
+  for (const b of tripletBeats) {
+    const sec = sectionAt(sections, b.start), s = sections[sec];
+    if (!s || b.start < s.start - EPS || b.start >= s.end - EPS) continue;
+    const bl = b.end - b.start, barMs = s.beatLength * s.meter;
+    const beatPos = Math.round((b.start - s.start) / s.beatLength);
+    const bar = s.bar0 + Math.floor(beatPos / s.meter);
+    const onBeatNote = out.find(n => Math.abs(n.t - b.start) < EPS);
+    if (onBeatNote) onBeatNote.primary = true;
+    else out.push({ t: b.start, slot: 0, primary: true, sec, bar, onBeat: true, downbeat: beatPos % s.meter === 0 });
+    for (const k of [1, 2]) {
+      out.push({ t: b.start + (k * bl) / 3, slot: TRIPLET_SLOT + k, primary: true, sec, bar: s.bar0 + Math.floor((b.start + (k * bl) / 3 - s.start) / barMs + 1e-9), onBeat: false, downbeat: false, triplet: true });
+    }
+  }
+  out.sort((a, b) => a.t - b.t);
+  return { beats, notes: out };
 }
+
+/** Slot ids of triplet-fill notes (TRIPLET_SLOT + 1 and + 2), kept apart from the pattern's slots. */
+export const TRIPLET_SLOT = 100;
 
 export function sectionAt(sections, t) {
   let lo = 0, hi = sections.length - 1, ans = 0;

@@ -12,6 +12,7 @@ export function parseOsu(text) {
 
   const kv = { General: {}, Metadata: {}, Difficulty: {}, Editor: {} };
   const rawTiming = [];
+  const objects = [];
   let background = null;
   let section = null;
 
@@ -39,6 +40,11 @@ export function parseOsu(text) {
       // Old formats have no "uninherited" column: a positive beat length means a red line.
       const uninherited = parts.length > 6 ? parts[6].trim() === '1' : beatLength > 0;
       if (Number.isFinite(time) && Number.isFinite(beatLength)) rawTiming.push({ time, beatLength, meter, uninherited });
+    } else if (section === 'HitObjects') {
+      // x,y,time,type,...; only the times are used (to find triplet fills); spinners are skipped
+      const parts = line.split(',');
+      const time = parseInt(parts[2], 10), type = parseInt(parts[3], 10);
+      if (Number.isFinite(time) && !(type & 8)) objects.push(time);
     }
   }
 
@@ -68,6 +74,7 @@ export function parseOsu(text) {
     mode: Number(G.Mode) || 0,
     background,
     timing,
+    objects: objects.map(t => t + shift),
   };
 }
 

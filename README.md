@@ -10,6 +10,7 @@ It's a fully static site: no backend, no build step, no dependencies. Everything
 - **Drum sounds:** pads trigger a kit synthesized in the browser (kick, snare, rimshot, side stick, toms, hi-hat with pedal choke, crash, splash, china, ride, bell), mapped from General MIDI notes and following velocity. You can switch it off in Settings if you monitor through your kit's module.
 - **Metronome mode** with any tempo and time signature, a count-in, a **speed trainer** (+N BPM every M bars) and a **gap trainer** (the click and the notes go silent for some bars, so you have to keep time on your own).
 - **Song mode with osu! beatmaps.** Drop an `.osz` file, an unpacked beatmap folder (or several, even your whole osu! `Songs` folder), or an `.osu` plus its audio. The app plays the song and follows every uninherited timing point (BPM, offset, meter). Hit objects are ignored. You can choose the start position and playback speed, and set a timing offset for each song.
+- **Triplet fills from beatmaps:** the hit objects of all difficulties are checked for how they are snapped. Beats where at least two difficulties use triplet snaps (1/3, 1/6, 1/12) and outvote straight snaps get a triplet grid instead of your chosen one; on the timeline they are shaded and labelled. Can be switched off in the playalong settings (`js/triplets.js`).
 - **Any audio file, no map needed:** drop an MP3 (or OGG, WAV, ...) without an `.osu` and the tempo is detected from the audio (`js/tempo.js`). You get the best three tempo options, ×2 / ÷2, a half-beat shift, beats per bar and bar start, plus a preview with the click track to confirm by ear. Works for songs with a steady tempo; tested on 99 constant-tempo osu! maps, the right grid was among the options for 97, typically within 1 ms.
 - **Rhythm grids:** hybrid grids (the default is 8ths with 16ths allowed, plus quarters with 8ths, and 8ths with triplets), quarters, halves, 8ths, off-beats, triplets, swing, 16ths, gallops, sextuplets, backbeat, son clave, or your own grid (for example `x..x..x.` in 16ths).
 - **Feedback:** a scrolling timeline with a lane per drum (cymbals, hi-hat, toms, snare, kick, top to bottom as in drum notation), an osu!-style hit-error meter, live accuracy / mean offset / consistency (σ and UR), a timing-over-time chart, and an end-of-session report broken down by drum, subdivision and tempo.
@@ -61,6 +62,7 @@ js/osu.js         .osu parsing (metadata, red-line timing points)
 js/beatsync.js    automatic beat-grid alignment from the audio
 js/tempo.js       tempo and beat-grid detection for songs without a map
 js/timing.js      tempo sections, rhythm patterns, expected-note grid
+js/triplets.js    triplet fills from beatmap hit objects
 js/scorer.js      hit matching, judgments, statistics
 js/render.js      canvas views (timeline, error meter, charts)
 js/calibration.js latency calibration

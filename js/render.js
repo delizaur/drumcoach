@@ -94,6 +94,19 @@ export class Timeline extends CanvasView {
       }
     }
 
+    // triplet sections (fills found in the beatmap)
+    if (s.tripletSections?.length) {
+      g.font = '600 10.5px system-ui'; g.textAlign = 'left';
+      for (const f of s.tripletSections) {
+        if (f.end < t0 || f.start > t1) continue;
+        const x0 = toX(f.start), x1 = toX(f.end);
+        g.fillStyle = alpha(c.judge[2], 0.07);
+        g.fillRect(x0, gridY - 12, x1 - x0, laneBottom - gridY + 12);
+        g.fillStyle = alpha(c.judge[2], 0.85);
+        g.fillText('TRIPLETS', Math.max(x0, 0) + 5, laneBottom - 5);
+      }
+    }
+
     // beat grid
     g.textAlign = 'left';
     for (let i = lowerBound(s.beats, t0); i < s.beats.length && s.beats[i].t <= t1; i++) {

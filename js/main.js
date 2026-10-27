@@ -952,6 +952,7 @@ function setMode(mode) {
   document.querySelectorAll('.tab').forEach(t => t.setAttribute('aria-selected', String(t.dataset.mode === mode)));
   $('metronomePane').hidden = mode !== 'metronome';
   $('songPane').hidden = mode !== 'song';
+  $('libraryPane').hidden = mode !== 'song';
   syncClickControls();
   renderSongInfo();
   updateStartButton();

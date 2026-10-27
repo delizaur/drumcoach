@@ -295,6 +295,17 @@
 
       <h3>Latency</h3>
       <div class="field">
+        <label for="audioBuffer">Audio buffer</label>
+        <select id="audioBuffer">
+          <option value="10">10 ms (lowest latency)</option>
+          <option value="20">20 ms</option>
+          <option value="40">40 ms</option>
+          <option value="80">80 ms (most stable)</option>
+        </select>
+        <small>If the audio stutters or the scrolling grid jumps back during playback, increase this. A larger buffer makes the sound a little later, so run the calibration again after changing it.</small>
+        <p class="buffer-note" id="audioBufferNote" hidden>Audio buffer changed. Run the calibration again so your timing stays accurate.</p>
+      </div>
+      <div class="field">
         <label for="latency">Latency compensation <output id="latencyLabel"></output></label>
         <div class="field-row tight">
           <input id="latency" type="range" min="-100" max="300" step="1" class="grow">

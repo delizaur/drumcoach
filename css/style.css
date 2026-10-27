@@ -310,6 +310,9 @@ input[type=range] { width: 100%; accent-color: var(--accent); margin: 6px 0 2px;
 .res-tiles { display: grid; grid-template-columns: repeat(4, minmax(0, 1fr)); gap: 12px; margin: 12px 0 16px; }
 .res-tiles .tile { background: var(--panel-2); }
 .res-tiles .tile-sub { white-space: normal; }
+.dropout-warn { background: rgba(255, 154, 77, .1); border: 1px solid rgba(255, 154, 77, .45); border-radius: var(--radius-sm); padding: 10px 14px; margin: 10px 0 4px; font-size: 13.5px; }
+.dropout-warn .btn { margin-left: 6px; }
+.buffer-note { color: var(--off); font-size: 12.5px; margin: 6px 0 0; }
 .insights { background: var(--panel-2); border: 1px solid var(--border); border-left: 3px solid var(--accent); border-radius: var(--radius-sm); padding: 10px 14px; margin: 0 0 16px; }
 .insights ul { margin: 0; padding-left: 18px; }
 .insights li { margin: 3px 0; }

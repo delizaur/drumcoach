@@ -9,8 +9,12 @@ const CLICK = {
 };
 
 export class AudioEngine {
-  constructor() {
+  /** @param {number} bufferMs output buffer size; larger is more robust against dropouts but adds delay */
+  constructor(bufferMs = 10) {
+    this.bufferMs = bufferMs;
     this.ctx = null;
+    this.dropouts = { events: 0, ms: 0 }; // detected from clock jumps, for browsers without playbackStats
+    this.behind = 0;
     this.clockSamples = [];
     this.clockOffset = 0;   // seconds; audible context time = perf seconds + clockOffset
     this.source = null;
@@ -23,7 +27,7 @@ export class AudioEngine {
   ensureContext() {
     if (this.ctx) return;
     const Ctx = window.AudioContext || window.webkitAudioContext;
-    this.ctx = new Ctx({ latencyHint: 'interactive' });
+    this.ctx = new Ctx({ latencyHint: this.bufferMs <= 10 ? 'interactive' : this.bufferMs / 1000 });
     this.musicGain = this.ctx.createGain();
     this.clickGain = this.ctx.createGain();
     this.musicGain.connect(this.ctx.destination);
@@ -35,6 +39,28 @@ export class AudioEngine {
     this.ensureContext();
     if (this.ctx.state !== 'running') await this.ctx.resume();
     return this.ctx;
+  }
+
+  /** Switches to a different buffer size. The context is recreated on next use; decoded songs stay valid. */
+  async setBuffer(ms) {
+    if (ms === this.bufferMs && this.ctx) return;
+    this.bufferMs = ms;
+    this.stop();
+    if (this.ctx) {
+      const old = this.ctx;
+      this.ctx = null;
+      await old.close().catch(() => {});
+    }
+    this.clockSamples = [];
+  }
+
+  /** Cumulative audio dropouts of the current context: { events, ms }. */
+  dropoutStats() {
+    const stats = this.ctx?.playbackStats;
+    if (stats && typeof stats.underrunEvents === 'number') {
+      return { events: stats.underrunEvents, ms: stats.underrunDuration * 1000 };
+    }
+    return { ...this.dropouts };
   }
 
   /** Decodes compressed audio. Works before the context is resumed (no user gesture needed). */
@@ -57,6 +83,18 @@ export class AudioEngine {
       sample = ts.contextTime - ts.performanceTime / 1000;
     } else {
       sample = ctx.currentTime - (ctx.outputLatency || ctx.baseLatency || 0) - performance.now() / 1000;
+    }
+    // A dropout makes the audio fall behind real time. Once that's clear (3 frames in a row), count it
+    // and re-sync right away instead of letting the median drift over half a second.
+    if (this.clockSamples.length >= 10 && sample < this.clockOffset - 0.004) {
+      if (++this.behind >= 3) {
+        this.dropouts.events++;
+        this.dropouts.ms += (this.clockOffset - sample) * 1000;
+        this.clockSamples = [];
+        this.behind = 0;
+      }
+    } else {
+      this.behind = 0;
     }
     this.clockSamples.push(sample);
     if (this.clockSamples.length > 31) this.clockSamples.shift();

@@ -20,7 +20,7 @@ const SETTINGS_KEY = 'drumcoach.settings.v1';
 const DEFAULTS = {
   mode: 'metronome',
   // input
-  midiInput: 'all', minVelocity: 8, mutedNotes: [], seenPads: [], keyboard: true, latency: 0,
+  midiInput: 'all', minVelocity: 8, mutedNotes: [], seenPads: [], keyboard: true, latency: 0, audioBuffer: 10,
   padSounds: false, keySounds: true, padVolume: 0.8, // kits usually have their own sounds; the keyboard doesn't
   // metronome
   bpm: 100, meter: 4, countIn: 1,
@@ -66,7 +66,7 @@ function songPrefs() {
 
 // ================================================================ state
 
-const audio = new AudioEngine();
+const audio = new AudioEngine(settings.audioBuffer);
 let song = null;      // { key, diffs, diff, diffIndex, buffer, audioName, durationMs, bgName, bgUrl }
 let session = null;
 let calib = null;
@@ -251,6 +251,7 @@ async function startSession({ preview = false, from = null } = {}) {
   recent.length = 0;
 
   audio.start({ buffer, startPos, rate, leadIn: 0.15 });
+  session.dropoutsAtStart = audio.dropoutStats();
   scheduleClicks();
   schedulerTimer = setInterval(scheduleClicks, 20);
 
@@ -278,6 +279,8 @@ function stopSession(withResults) {
   const s = session;
   session = null;
   clearInterval(schedulerTimer);
+  const d = audio.dropoutStats();
+  s.dropouts = { events: d.events - s.dropoutsAtStart.events, ms: d.ms - s.dropoutsAtStart.ms };
   audio.stop();
 
   $('startBtn').textContent = 'Start';
@@ -461,7 +464,14 @@ function showResults(s) {
 
   $('resultsTitle').textContent = s.title;
   const acc = st.accuracy == null ? '—' : `${(st.accuracy * 100).toFixed(1)}%`;
-  $('resultsBody').innerHTML = `
+  const dropoutNote = s.dropouts?.events > 0 ? `
+    <div class="dropout-warn">
+      <b>${s.dropouts.events} audio dropout${s.dropouts.events > 1 ? 's' : ''}</b> during this session (${Math.round(s.dropouts.ms)} ms of missing audio).
+      Dropouts make the audio stutter and the grid jump back, which can throw off your timing and these results.
+      Try a larger <b>audio buffer</b> in Settings, then run the calibration again.
+      <button class="btn small" type="button" id="dropoutSettings">Open settings</button>
+    </div>` : '';
+  $('resultsBody').innerHTML = dropoutNote + `
     <div class="res-tiles">
       <div class="tile"><div class="tile-label">Accuracy</div><div class="tile-value">${acc}</div><div class="tile-sub">${st.counts[0]} perfect · ${st.counts[1]} great · ${st.counts[2]} good</div></div>
       <div class="tile"><div class="tile-label">Average offset</div><div class="tile-value">${st.nHits ? fmtMs(st.mean, 1) : '—'}</div><div class="tile-sub">${st.nHits ? tendency(st.mean) : ''}</div></div>
@@ -494,6 +504,11 @@ function showResults(s) {
     };
   }
 
+  $('dropoutSettings')?.addEventListener('click', () => {
+    $('resultsDialog').close();
+    openSettings();
+    $('audioBuffer').focus();
+  });
   $('resultsDialog').showModal();
   const { x0 } = scatterRange(s);
   new Scatter($('resScatter')).draw({
@@ -1177,11 +1192,29 @@ setLatency(settings.latency);
 $('latency').addEventListener('input', e => setLatency(Number(e.target.value)));
 $('latencyNum').addEventListener('change', e => setLatency(Number(e.target.value) || 0));
 
-function openSettings() {
+$('audioBuffer').value = settings.audioBuffer;
+$('audioBuffer').addEventListener('change', async e => {
+  const ms = Number(e.target.value);
+  if (session) stopSession(false);
+  calib?.cancel();
+  settings.audioBuffer = ms;
+  save();
+  kit = null; // drum sounds belong to the old audio context
+  await audio.setBuffer(ms);
+  await audio.init().catch(() => {}); // the change is a user gesture, so the new context can start now
+  $('audioBufferNote').hidden = false;
+  updateLatencyInfo();
+});
+
+function updateLatencyInfo() {
   const ms = audio.outputLatencyMs;
   $('latencyInfo').textContent = ms == null
     ? 'Start a session once to see the latency your browser reports for audio output.'
     : `Your browser reports ${ms.toFixed(0)} ms of audio output latency. DrumCoach already corrects for this, so the value above only needs to cover what's left.`;
+}
+
+function openSettings() {
+  updateLatencyInfo();
   renderMidiStatus();
   renderPads();
   $('settingsDialog').showModal();

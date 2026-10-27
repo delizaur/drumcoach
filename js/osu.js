@@ -2,6 +2,7 @@
 // metadata, audio filename, background and the uninherited ("red line") timing points.
 import { basename } from './util.js';
 
+const MIN_BEAT_LENGTH = 20; // ms, i.e. 3000 BPM
 const KEY_VALUE_SECTIONS = new Set(['General', 'Metadata', 'Difficulty', 'Editor']);
 
 export function parseOsu(text) {
@@ -52,7 +53,9 @@ export function parseOsu(text) {
   const shift = formatVersion < 5 ? 24 : 0;
 
   const timing = rawTiming
-    .filter(t => t.uninherited && t.beatLength > 0 && t.beatLength < 60000)
+    // Some maps add red lines with absurd tempos (beat lengths down to 1e-298 ms) as a visual trick;
+    // they mean nothing musically and would make beat loops run forever.
+    .filter(t => t.uninherited && t.beatLength >= MIN_BEAT_LENGTH && t.beatLength < 60000)
     .map((t, i) => ({ ...t, i }))
     .sort((a, b) => a.time - b.time || a.i - b.i)
     // when two red lines share a timestamp, the later one in the file wins

@@ -98,6 +98,7 @@ export function buildGrid(sections, pattern, { tripletBeats = [] } = {}) {
     const bl = s.beatLength;
     const barMs = bl * s.meter;
     s.bar0 = bar0;
+    if (!(bl >= 20)) return; // safety net: a near-zero beat length would never advance the loops below
 
     for (let k = 0; ; k++) {
       const t = s.start + k * bl;

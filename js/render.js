@@ -44,8 +44,8 @@ class CanvasView {
 export class Timeline extends CanvasView {
   constructor(canvas) {
     super(canvas);
-    this.futureMs = 2200; // real ms visible ahead of the hit line
-    this.hitFrac = 0.22;
+    this.futureMs = 1400; // real ms visible ahead of the hit line (same scroll speed as before)
+    this.hitFrac = 0.5; // hit line in the middle
   }
 
   /**

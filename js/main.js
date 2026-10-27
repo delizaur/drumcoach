@@ -432,7 +432,7 @@ function insightsFor(st, slotRows, tempoRows, laneRows) {
   }
 
   const missRate = st.counts[MISS] / st.judged;
-  if (missRate > 0.1) out.push(`${(missRate * 100).toFixed(0)}% of your strokes were more than ${STRICTNESS[settings.strictness].good} ms off the grid and counted as misses.`);
+  if (missRate > 0.1) out.push(`${(missRate * 100).toFixed(0)}% of your strokes were too far from the grid and counted as misses.`);
   if (st.extra > Math.max(4, 0.1 * st.judged)) out.push(`${st.extra} strokes doubled up on a grid note that was already played. If a pad you aren't practicing with (like the hi-hat pedal) caused them, mute it in Settings. If you're playing faster notes on purpose, pick a finer rhythm grid.`);
   return out;
 }
@@ -1041,7 +1041,7 @@ function renderPattern() {
 function renderStrictness() {
   document.querySelectorAll('#strictness button').forEach(b => b.setAttribute('aria-checked', String(b.dataset.value === settings.strictness)));
   const w = STRICTNESS[settings.strictness];
-  $('windowsHint').textContent = `Perfect ±${w.perfect} · Great ±${w.great} · Good ±${w.good} ms`;
+  $('windowsHint').textContent = `Perfect ±${w.perfect} · Great ±${w.great} · Good ±${w.good} ms (good is narrower on dense, fast grids)`;
 }
 document.querySelectorAll('#strictness button').forEach(b => {
   b.onclick = () => { settings.strictness = b.dataset.value; save(); renderStrictness(); };

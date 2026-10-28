@@ -226,7 +226,11 @@ export class Timeline extends CanvasView {
 // ---------------------------------------------------------------- error meter
 
 export class ErrorMeter extends CanvasView {
-  /** @param {{recent: {err:number, j:number, at:number}[], windows, mean:number|null, now:number}} s */
+  /**
+   * @param {{recent: {err:number, j:number, at:number}[], windows, zones?: {early, late}, mean:number|null, now:number}} s
+   * zones: the windows of the latest stroke's grid note on each side (they shrink on dense grids);
+   * the meter eases towards them so alternating 8ths and 16ths don't make it flicker.
+   */
   draw(s) {
     this.last = s;
     const { g, w, h } = this, c = colors();
@@ -235,18 +239,27 @@ export class ErrorMeter extends CanvasView {
     const toX = e => w / 2 + (Math.max(-range, Math.min(range, e)) / range) * (w / 2 - 6);
     const cy = h / 2;
 
+    const target = s.zones || { early: s.windows, late: s.windows };
+    const ease = (a, b) => a == null ? b : a + (b - a) * 0.2;
+    const cur = this.zones || (this.zones = { early: {}, late: {} });
+    for (const side of ['early', 'late']) {
+      for (const k of ['perfect', 'great', 'good']) cur[side][k] = ease(cur[side][k], target[side][k]);
+    }
+
     // zones, outermost first
-    const zones = [[range, MISS], [s.windows.good, 2], [s.windows.great, 1], [s.windows.perfect, 0]];
-    for (const [r, j] of zones) {
-      g.fillStyle = alpha(c.judge[j], j === MISS ? 0.12 : 0.22);
-      g.fillRect(toX(-r), cy - 5, toX(r) - toX(-r), 10);
+    g.fillStyle = alpha(c.judge[MISS], 0.12);
+    g.fillRect(toX(-range), cy - 5, toX(range) - toX(-range), 10);
+    for (const [k, j] of [['good', 2], ['great', 1], ['perfect', 0]]) {
+      g.fillStyle = alpha(c.judge[j], 0.22);
+      g.fillRect(toX(-cur.early[k]), cy - 5, toX(cur.late[k]) - toX(-cur.early[k]), 10);
     }
     g.fillStyle = c.text;
     g.fillRect(w / 2 - 1, cy - 14, 2, 28);
 
     // tick labels
     g.fillStyle = c.faint; g.font = '10px system-ui'; g.textAlign = 'center';
-    for (const v of [-s.windows.good, s.windows.good]) g.fillText(`${v > 0 ? '+' : '−'}${Math.abs(v)}`, toX(v), h - 2);
+    g.fillText(`−${Math.round(target.early.good)}`, toX(-cur.early.good), h - 2);
+    g.fillText(`+${Math.round(target.late.good)}`, toX(cur.late.good), h - 2);
 
     for (const hit of s.recent) {
       const age = (s.now - hit.at) / 4000;
@@ -359,20 +372,24 @@ export class Histogram extends CanvasView {
     const range = Math.ceil((windows.good * 1.6) / 10) * 10;
     const bin = range > 80 ? 5 : 3;
     const nb = Math.ceil((2 * range) / bin);
-    const counts = new Array(nb).fill(0);
+    // each bar is stacked by the judgments its hits actually got (windows vary with the grid spacing)
+    const counts = new Array(nb).fill(0), byJudge = Array.from({ length: nb }, () => [0, 0, 0, 0]);
     for (const hit of hits) {
       const b = Math.floor((Math.max(-range, Math.min(range - 0.001, hit.err)) + range) / bin);
       counts[b]++;
+      byJudge[b][hit.j]++;
     }
     const max = Math.max(1, ...counts);
-    const padB = 16, padT = 8, bw = w / nb;
+    const padB = 16, padT = 8, bw = w / nb, scale = (h - padB - padT) / max;
     for (let b = 0; b < nb; b++) {
-      const center = -range + (b + 0.5) * bin;
-      const hh = (counts[b] / max) * (h - padB - padT);
-      const a = Math.abs(center);
-      const j = a <= windows.perfect ? 0 : a <= windows.great ? 1 : a <= windows.good ? 2 : MISS;
-      g.fillStyle = alpha(c.judge[j], 0.85);
-      g.fillRect(b * bw + 0.5, h - padB - hh, Math.max(1, bw - 1), hh);
+      let y = h - padB;
+      for (let j = 0; j <= MISS; j++) {
+        const hh = byJudge[b][j] * scale;
+        if (!hh) continue;
+        g.fillStyle = alpha(c.judge[j], 0.85);
+        g.fillRect(b * bw + 0.5, y - hh, Math.max(1, bw - 1), hh);
+        y -= hh;
+      }
     }
     g.fillStyle = c.text;
     g.fillRect(w / 2 - 0.5, padT, 1, h - padB - padT);

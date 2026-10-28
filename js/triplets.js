@@ -15,6 +15,18 @@ const MAX_BRIDGE = 16; // beats without evidence that may sit inside a triplet s
 const MIN_BEAT = 100;  // ms (600 BPM); shorter beats only occur in joke maps
 const MAX_BEATS = 50000; // ~4 hours at 200 BPM; keeps absurd maps from using unbounded memory
 
+const KEY_TOL = 2; // ms; difficulties of a mapset may place the same red line a millisecond apart
+
+/** The key of `map` within KEY_TOL ms of `key`, or `key` itself if there is none. */
+export function nearKey(map, key) {
+  if (map.has(key)) return key;
+  for (let d = 1; d <= KEY_TOL; d++) {
+    if (map.has(key - d)) return key - d;
+    if (map.has(key + d)) return key + d;
+  }
+  return key;
+}
+
 function redLineAt(timing, t) {
   let r = timing[0];
   for (const x of timing) if (x.time <= t + 1) r = x;
@@ -40,27 +52,35 @@ export function snapAt(timing, t) {
  */
 export function tripletBeats(diffs) {
   const votes = new Map(); // beat start (rounded ms) → { T, B, start, len }
-  let voters = 0;
+  const spans = []; // [first, last] object time of each difficulty that votes
   for (const d of diffs) {
     if (!d.objects?.length || !d.timing?.length) continue;
-    const seen = new Map();
+    const seen = new Map(); // rounded beat start → { snaps: Set, start, len }
     for (const t of d.objects) {
       const { snap, start, len } = snapAt(d.timing, t);
       if (!snap || snap === 1) continue; // on the beat (or unsnapped): says nothing
       const key = Math.round(start);
-      const kind = TERNARY.has(snap) ? 'T' : 'B';
-      const prev = seen.get(key);
-      seen.set(key, { kind: prev && prev.kind !== kind ? 'B' : kind, start, len }); // mixed counts as straight
+      if (!seen.has(key)) seen.set(key, { snaps: new Set(), start, len });
+      seen.get(key).snaps.add(snap);
     }
-    if (seen.size) voters++;
-    for (const [key, v] of seen) {
+    // A beat is a triplet beat if it uses 1/3, 1/6 or 1/12 snaps and all its snaps fit that grid:
+    // a 1/2 snap is the middle sextuplet and a 1/4 snap sits on the 1/12 grid. Other mixes are straight.
+    for (const v of seen.values()) {
+      const finest = Math.max(...[...v.snaps].filter(s => TERNARY.has(s)), 0);
+      v.kind = finest && [...v.snaps].every(s => finest % s === 0) ? 'T' : 'B';
+    }
+    if (seen.size) spans.push([Math.min(...d.objects), Math.max(...d.objects)]);
+    for (const [k, v] of seen) {
+      const key = nearKey(votes, k);
       const e = votes.get(key) || { T: 0, B: 0, start: v.start, len: v.len };
       e[v.kind]++;
       votes.set(key, e);
     }
   }
-  const need = Math.min(2, voters);
-  if (!need) return [];
+  if (!spans.length) return [];
+  // Two difficulties must agree, or one where it's the only one mapping that part of the song (some
+  // mapsets have short difficulties that cover only a section).
+  const needAt = t => Math.max(1, Math.min(2, spans.filter(([a, b]) => t >= a - 2000 && t <= b + 2000).length));
 
   // Walk every beat of the song in order. Many beats have no off-beat objects and can't vote either
   // way; once a triplet section has started, those don't end it. Only a beat with clear straight
@@ -77,8 +97,9 @@ export function tripletBeats(diffs) {
     }
   });
   const state = b => {
-    const key = Math.round(b.start), v = votes.get(key) ?? votes.get(key - 1) ?? votes.get(key + 1);
+    const v = votes.get(nearKey(votes, Math.round(b.start)));
     if (!v) return null;
+    const need = needAt(b.start);
     return v.T >= need && v.T > v.B ? 'T' : v.B >= need && v.B > v.T ? 'B' : null; // weak or tied: no evidence
   };
   const out = [];

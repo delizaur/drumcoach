@@ -6,7 +6,7 @@
 // Only the detailed difficulties count (at least 60% of the most detailed one's off-beat objects),
 // since easier ones simplify the rhythm, and a beat needs at least two of them to agree, so a single
 // overmapped difficulty can't add positions on its own.
-import { snapAt } from './triplets.js';
+import { snapAt, nearKey } from './triplets.js';
 
 const DETAILED_SHARE = 0.6;
 
@@ -35,22 +35,26 @@ export function finerBeats(diffs, tripletBeats) {
       if (!beats.has(key)) beats.set(key, { snaps: new Set(), start, len });
       beats.get(key).snaps.add(snap);
     }
-    return { beats, offbeat };
+    return { beats, offbeat, span: [Math.min(...d.objects), Math.max(...d.objects)] };
   });
   if (!per.length) return { sextuplets: [], thirtySeconds: [] };
   const most = Math.max(...per.map(p => p.offbeat));
   const detailed = per.filter(p => p.offbeat > 0 && p.offbeat >= DETAILED_SHARE * most);
-  const need = Math.min(2, detailed.length);
-  if (!need) return { sextuplets: [], thirtySeconds: [] };
+  if (!detailed.length) return { sextuplets: [], thirtySeconds: [] };
+  // two must agree, unless only one detailed difficulty maps that part of the song
+  const needAt = t => Math.max(1, Math.min(2, detailed.filter(({ span: [a, b] }) => t >= a - 2000 && t <= b + 2000).length));
 
-  const triplet = new Set(tripletBeats.map(b => Math.round(b.start)));
-  const isTriplet = key => triplet.has(key) || triplet.has(key - 1) || triplet.has(key + 1);
-  const agreed = (key, snaps) => detailed.filter(p => snaps.some(s => p.beats.get(key)?.snaps.has(s))).length >= need;
+  // beat keys of different difficulties may be a millisecond apart (see nearKey)
+  const triplet = new Map(tripletBeats.map(b => [Math.round(b.start), true]));
+  const isTriplet = key => triplet.has(nearKey(triplet, key));
+  const beatOf = (p, key) => p.beats.get(nearKey(p.beats, key));
+  const agreed = (key, snaps) => detailed.filter(p => snaps.some(s => beatOf(p, key)?.snaps.has(s))).length >= needAt(key);
 
   const sextuplets = [], thirtySeconds = [];
-  const keys = new Set(detailed.flatMap(p => [...p.beats.keys()]));
-  for (const key of [...keys].sort((a, b) => a - b)) {
-    const b = detailed.map(p => p.beats.get(key)).find(Boolean);
+  const keys = new Map();
+  for (const p of detailed) for (const k of p.beats.keys()) keys.set(nearKey(keys, k), true);
+  for (const key of [...keys.keys()].sort((a, b) => a - b)) {
+    const b = detailed.map(p => beatOf(p, key)).find(Boolean);
     const beat = { start: b.start, end: b.start + b.len };
     if (isTriplet(key)) { if (agreed(key, [6, 12])) sextuplets.push(beat); }
     else if (agreed(key, [8, 16])) thirtySeconds.push(beat);

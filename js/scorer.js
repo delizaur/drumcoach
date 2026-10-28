@@ -39,7 +39,7 @@ export class Scorer {
     this.hybrid = notes.some(x => x.primary === false); // grid with primary (e.g. 8th) and secondary (16th) notes
     this.judge = new Int8Array(notes.length).fill(-1); // best judgment among the strokes on each grid note
     this.claimed = new Set(); // "noteIndex|pad" pairs already played
-    this.hits = [];     // strokes on the grid: { t, err, j, i, slot, sec, pad, lane }
+    this.hits = [];     // strokes on the grid: { t, err, j, i, slot, sec, pad, lane, zones: {early, late} windows }
     this.misses = [];   // strokes too far off the grid: same shape
     this.extras = [];   // same pad striking an already-played grid note again: { t, pad, lane }
     this.counts = [0, 0, 0, 0];
@@ -98,10 +98,11 @@ export class Scorer {
 
     const err = errSong / this.rate;
     const j = this.classify(err, i);
+    const zones = { early: this.windowsAt(i, -1), late: this.windowsAt(i, 1) }; // for display
     if (j === MISS) {
       this.counts[MISS]++;
       this.streak = 0;
-      const miss = { t, err, j, i, slot: n[i].slot, sec: n[i].sec, pad, lane };
+      const miss = { t, err, j, i, slot: n[i].slot, sec: n[i].sec, pad, lane, zones };
       this.misses.push(miss);
       return { type: 'miss', hit: miss };
     }
@@ -119,7 +120,7 @@ export class Scorer {
     this.weight += WEIGHT[j];
     this.streak++;
     this.maxStreak = Math.max(this.maxStreak, this.streak);
-    const hit = { t, err, j, i, slot: n[i].slot, sec: n[i].sec, pad, lane };
+    const hit = { t, err, j, i, slot: n[i].slot, sec: n[i].sec, pad, lane, zones };
     this.hits.push(hit);
     return { type: 'hit', hit };
   }

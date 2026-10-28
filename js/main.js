@@ -144,8 +144,7 @@ function stroke(perfTime, note) {
   const res = session.scorer.hit(songT - settings.latency * session.rate, pad, lane);
   if (!res) return;
   if (res.type === 'hit' || res.type === 'miss') {
-    const sc = session.scorer, i = res.hit.i;
-    recent.push({ err: res.hit.err, j: res.hit.j, at: performance.now(), zones: { early: sc.windowsAt(i, -1), late: sc.windowsAt(i, 1) } });
+    recent.push({ err: res.hit.err, j: res.hit.j, at: performance.now(), zones: res.hit.zones });
     if (recent.length > 60) recent.shift();
     showFeedback(res.hit.j, res.hit.err);
   }

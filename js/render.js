@@ -297,10 +297,25 @@ export class Scatter extends CanvasView {
     const toX = t => padL + ((t - s.x0) / span) * pw;
     const toY = e => padT + ph / 2 - (Math.max(-range, Math.min(range, e)) / range) * (ph / 2);
 
-    // judgment bands
-    for (const [r, j] of [[s.windows.good, 2], [s.windows.great, 1], [s.windows.perfect, 0]]) {
+    // judgment bands: the windows each stroke was judged with (they shrink on dense grids), from
+    // halfway to the previous stroke to halfway to the next; the nominal windows away from strokes
+    const nominal = { early: s.windows, late: s.windows }, REACH = 2000, right = padL + pw;
+    const px = t => Math.min(right, Math.max(padL, Math.round(toX(t))));
+    const strokes = [...s.hits, ...s.misses].filter(x => x.zones).sort((a, b) => a.t - b.t);
+    const segs = [];
+    let cursor = padL;
+    strokes.forEach((st, k) => {
+      const a = k ? Math.max((strokes[k - 1].t + st.t) / 2, st.t - REACH) : st.t - REACH;
+      const b = k + 1 < strokes.length ? Math.min((st.t + strokes[k + 1].t) / 2, st.t + REACH) : st.t + REACH;
+      const xa = Math.max(cursor, px(a)), xb = px(b);
+      if (xa > cursor) segs.push([cursor, xa, nominal]);
+      if (xb > xa) segs.push([xa, xb, st.zones]);
+      cursor = Math.max(cursor, xb);
+    });
+    if (cursor < right) segs.push([cursor, right, nominal]);
+    for (const [k, j] of [['good', 2], ['great', 1], ['perfect', 0]]) {
       g.fillStyle = alpha(c.judge[j], 0.07);
-      g.fillRect(padL, toY(r), pw, toY(-r) - toY(r));
+      for (const [x0, x1, z] of segs) g.fillRect(x0, toY(z.late[k]), x1 - x0, toY(-z.early[k]) - toY(z.late[k]));
     }
     // axes
     g.strokeStyle = 'rgba(255,255,255,0.25)'; g.lineWidth = 1;

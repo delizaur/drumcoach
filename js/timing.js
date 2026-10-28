@@ -132,20 +132,28 @@ export function buildGrid(sections, pattern, { tripletBeats = [] } = {}) {
   });
   if (!tripletBeats.length) return { beats, notes };
 
+  // Beats can be cut short by a timing point in the middle of them (common in maps of live
+  // recordings): clip every special beat at its section's end and use that section's tempo.
+  const clip = list => list.map(b => {
+    const sec = sectionAt(sections, b.start), s = sections[sec];
+    return s && b.start >= s.start - EPS && b.start < s.end - EPS
+      ? { start: b.start, end: Math.min(b.end, s.end), bl: s.beatLength, sec, s } : null;
+  }).filter(Boolean);
+  tripletBeats = clip(tripletBeats);
+
   // In triplet beats, keep (or add) the note on the beat and replace everything in between with
   // the two triplet positions. All of them are primary notes, so hybrid snapping doesn't apply there.
   const inside = t => tripletBeats.some(b => t > b.start + EPS && t < b.end - EPS);
   const out = notes.filter(n => !inside(n.t));
   for (const b of tripletBeats) {
-    const sec = sectionAt(sections, b.start), s = sections[sec];
-    if (!s || b.start < s.start - EPS || b.start >= s.end - EPS) continue;
-    const bl = b.end - b.start, barMs = s.beatLength * s.meter;
+    const { sec, s, bl } = b, barMs = s.beatLength * s.meter;
     const beatPos = Math.round((b.start - s.start) / s.beatLength);
     const bar = s.bar0 + Math.floor(beatPos / s.meter);
     const onBeatNote = out.find(n => Math.abs(n.t - b.start) < EPS);
     if (onBeatNote) onBeatNote.primary = true;
     else out.push({ t: b.start, slot: 0, primary: true, sec, bar, onBeat: true, downbeat: beatPos % s.meter === 0 });
     for (const k of [1, 2]) {
+      if (b.start + (k * bl) / 3 >= b.end - EPS) continue;
       out.push({ t: b.start + (k * bl) / 3, slot: TRIPLET_SLOT + k, primary: true, sec, bar: s.bar0 + Math.floor((b.start + (k * bl) / 3 - s.start) / barMs + 1e-9), onBeat: false, downbeat: false, triplet: true });
     }
   }

@@ -35,6 +35,7 @@ const DEFAULTS = {
   rate: 1, musicVolume: 0.85, songClick: false, lastSong: null, songPrefs: {},
   autoSync: true, syncFineTune: 0, syncMigrated: false, useTriplets: true,
   openGroups: { playalongGroup: true, libraryBox: true }, // collapsible panel sections
+  timelineZoom: 1, showWindows: false, // scrolling grid view
 };
 
 const settings = (() => {
@@ -78,6 +79,30 @@ const recent = [];    // recent hits for the error meter: { err, j, at }
 const timeline = new Timeline($('timeline'));
 const errorMeter = new ErrorMeter($('errorMeter'));
 const scatter = new Scatter($('scatter'));
+
+// ---- scrolling grid view: zoom and timing windows
+const ZOOMS = [0.5, 0.75, 1, 1.5, 2, 3];
+function renderTimelineTools() {
+  timeline.zoom = settings.timelineZoom;
+  timeline.showWindows = settings.showWindows;
+  const k = ZOOMS.indexOf(settings.timelineZoom);
+  $('zoomLabel').textContent = `${settings.timelineZoom}×`;
+  $('zoomOut').disabled = k <= 0;
+  $('zoomIn').disabled = k >= ZOOMS.length - 1;
+  $('windowsToggle').setAttribute('aria-pressed', String(settings.showWindows));
+  if (!session && timeline.last) timeline.draw(timeline.last);
+}
+for (const [id, d] of [['zoomOut', -1], ['zoomIn', 1]]) {
+  $(id).onclick = () => {
+    const k = ZOOMS.indexOf(settings.timelineZoom);
+    settings.timelineZoom = ZOOMS[clamp((k < 0 ? ZOOMS.indexOf(1) : k) + d, 0, ZOOMS.length - 1)];
+    save();
+    renderTimelineTools();
+  };
+}
+$('windowsToggle').onclick = () => { settings.showWindows = !settings.showWindows; save(); renderTimelineTools(); };
+if (!ZOOMS.includes(settings.timelineZoom)) settings.timelineZoom = 1;
+renderTimelineTools();
 
 // ================================================================ input
 

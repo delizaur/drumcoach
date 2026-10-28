@@ -225,6 +225,14 @@
         <div class="stage-bg" id="stageBg"></div>
         <canvas id="timeline"></canvas>
         <div id="feedback" class="feedback"></div>
+        <div class="timeline-tools">
+          <button id="windowsToggle" class="tool-toggle" aria-pressed="false" title="Show the timing windows of each grid note: perfect, great and good. Strokes between them are misses.">Windows</button>
+          <div class="zoom" role="group" aria-label="Zoom">
+            <button id="zoomOut" title="Zoom out" aria-label="Zoom out">−</button>
+            <span id="zoomLabel">1×</span>
+            <button id="zoomIn" title="Zoom in" aria-label="Zoom in">+</button>
+          </div>
+        </div>
         <div class="idle-hint" id="idleHint">
           <div>
             Press <b>Start</b> and play along. Grid notes scroll toward the line. Play any of them; the ones you skip are fine.<br>

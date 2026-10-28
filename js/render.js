@@ -44,8 +44,10 @@ class CanvasView {
 export class Timeline extends CanvasView {
   constructor(canvas) {
     super(canvas);
-    this.futureMs = 1400; // real ms visible ahead of the hit line (same scroll speed as before)
+    this.futureMs = 1400; // real ms visible ahead of the hit line at zoom 1
     this.hitFrac = 0.5; // hit line in the middle
+    this.zoom = 1; // > 1 spreads the notes out
+    this.showWindows = false; // draw each grid note's timing windows
   }
 
   /**
@@ -59,7 +61,7 @@ export class Timeline extends CanvasView {
     if (!s) return;
 
     const hitX = Math.round(w * this.hitFrac);
-    const pxPerMs = (w - hitX) / this.futureMs;
+    const pxPerMs = (w - hitX) / (this.futureMs / this.zoom);
     const toX = t => hitX + ((t - s.now) / s.rate) * pxPerMs;
     const t0 = s.now - (hitX / pxPerMs) * s.rate - 50;
     const t1 = s.now + ((w - hitX) / pxPerMs) * s.rate + 50;
@@ -133,8 +135,26 @@ export class Timeline extends CanvasView {
       g.fillText(`${+bpm.toFixed(1)} BPM${sec.meter !== 4 ? ` · ${sec.meter}/4` : ''}`, x, 13);
     }
 
-    // grid notes: where strokes may land (on any drum)
     const sc = s.scorer;
+
+    // timing windows of each grid note (they shrink where notes are close together): bars on the
+    // grid row, and a faint tint through the lanes so the miss gaps between notes stand out
+    if (this.showWindows) {
+      for (let i = Math.max(sc.first, lowerBound(s.notes, t0 - 200)); i < s.notes.length && s.notes[i].t <= t1 + 200; i++) {
+        const n = s.notes[i];
+        if (s.hiddenBar?.(n.bar)) continue;
+        const early = sc.windowsAt(i, -1), late = sc.windowsAt(i, 1);
+        for (const [k, j, a, lane] of [['good', 2, 0.3, 0.05], ['great', 1, 0.4, 0.05], ['perfect', 0, 0.55, 0.06]]) {
+          const x0 = toX(n.t - early[k] * s.rate), x1 = toX(n.t + late[k] * s.rate);
+          g.fillStyle = alpha(c.judge[j], lane);
+          g.fillRect(x0, laneTop, x1 - x0, laneBottom - laneTop);
+          g.fillStyle = alpha(c.judge[j], a);
+          g.fillRect(x0, gridY - 9, x1 - x0, 18);
+        }
+      }
+    }
+
+    // grid notes: where strokes may land (on any drum)
     for (let i = lowerBound(s.notes, t0); i < s.notes.length && s.notes[i].t <= t1; i++) {
       const n = s.notes[i], x = toX(n.t), j = sc.judge[i];
       const r = n.downbeat ? 7 : n.onBeat ? 6 : n.primary === false ? 3 : 4.5; // hybrid: secondary notes are small

@@ -3,8 +3,9 @@
 // Each object's position between two beats reveals its snap (1/2, 1/4, 1/3, ...). Every difficulty
 // votes per beat: "triplet" if its off-beat objects there use 1/3, 1/6 or 1/12 snaps, "straight" if
 // they use 1/2, 1/4, ... A beat counts as a triplet beat when at least two difficulties (or the only
-// one) vote for it and the triplet votes outnumber the straight ones. Beats without any off-beat
-// objects in between two triplet beats stay in the section, unless straight evidence comes first.
+// one) vote for it and the triplet votes outweigh the straight ones; detailed difficulties weigh
+// more, since easier ones simplify rhythms. Beats without any off-beat objects in between two
+// triplet beats stay in the section, unless straight evidence comes first.
 // Tested on two mapsets of the same song: both found the same one-bar fills, and the drums in the
 // audio confirmed them.
 
@@ -51,36 +52,55 @@ export function snapAt(timing, t) {
  * @returns {{start: number, end: number}[]} triplet beats in map time (ms), sorted
  */
 export function tripletBeats(diffs) {
-  const votes = new Map(); // beat start (rounded ms) → { T, B, start, len }
-  const spans = []; // [first, last] object time of each difficulty that votes
+  const per = []; // { seen, span: [first, last] object time, density: off-beat objects per second }
   for (const d of diffs) {
     if (!d.objects?.length || !d.timing?.length) continue;
     const seen = new Map(); // rounded beat start → { snaps: Set, start, len }
+    let offbeat = 0;
     for (const t of d.objects) {
       const { snap, start, len } = snapAt(d.timing, t);
       if (!snap || snap === 1) continue; // on the beat (or unsnapped): says nothing
+      offbeat++;
       const key = Math.round(start);
       if (!seen.has(key)) seen.set(key, { snaps: new Set(), start, len });
       seen.get(key).snaps.add(snap);
     }
-    // A beat is a triplet beat if it uses 1/3, 1/6 or 1/12 snaps and all its snaps fit that grid:
-    // a 1/2 snap is the middle sextuplet and a 1/4 snap sits on the 1/12 grid. Other mixes are straight.
+    if (!seen.size) continue;
+    // A beat is a triplet beat if it uses 1/3, 1/6 or 1/12 snaps and all its snaps fit the sextuplet
+    // grid (the 1/12 grid if it uses 1/12): a 1/2 snap is the middle sextuplet, and a 1/4 snap sits on
+    // the 1/12 grid. Other mixes are straight.
     for (const v of seen.values()) {
-      const finest = Math.max(...[...v.snaps].filter(s => TERNARY.has(s)), 0);
-      v.kind = finest && [...v.snaps].every(s => finest % s === 0) ? 'T' : 'B';
+      const snaps = [...v.snaps], grid = v.snaps.has(12) ? 12 : 6;
+      v.kind = snaps.some(s => TERNARY.has(s)) && snaps.every(s => grid % s === 0) ? 'T' : 'B';
     }
-    if (seen.size) spans.push([Math.min(...d.objects), Math.max(...d.objects)]);
-    for (const [k, v] of seen) {
+    // A beat with only 1/2 snaps fits both grids. Next to a triplet beat of the same difficulty (maps
+    // often alternate the two in sextuplet grooves), it says nothing; elsewhere it's straight.
+    const halfOnly = v => v.snaps.size === 1 && v.snaps.has(2);
+    const tripletAt = t => seen.get(nearKey(seen, Math.round(t)))?.kind === 'T';
+    for (const [k, v] of [...seen]) {
+      if (halfOnly(v) && (tripletAt(v.start - v.len) || tripletAt(v.start + v.len))) seen.delete(k);
+    }
+    const span = [Math.min(...d.objects), Math.max(...d.objects)];
+    per.push({ seen, span, density: offbeat / Math.max(1, span[1] - span[0]) });
+  }
+  if (!per.length) return [];
+
+  // Easier difficulties simplify rhythms (often following the vocals instead of the drums), so votes
+  // are weighted by the square of each difficulty's off-beat density relative to the densest one:
+  // a difficulty with half the detail has a quarter of the say.
+  const most = Math.max(...per.map(p => p.density));
+  const covers = (p, t) => t >= p.span[0] - 2000 && t <= p.span[1] + 2000;
+  const votes = new Map(); // beat start (rounded ms) → { T, B: voter counts, wT, wB: weighted }
+  for (const p of per) {
+    const w = (p.density / most) ** 2;
+    for (const [k, v] of p.seen) {
       const key = nearKey(votes, k);
-      const e = votes.get(key) || { T: 0, B: 0, start: v.start, len: v.len };
+      const e = votes.get(key) || { T: 0, B: 0, wT: 0, wB: 0 };
       e[v.kind]++;
+      e['w' + v.kind] += w;
       votes.set(key, e);
     }
   }
-  if (!spans.length) return [];
-  // Two difficulties must agree, or one where it's the only one mapping that part of the song (some
-  // mapsets have short difficulties that cover only a section).
-  const needAt = t => Math.max(1, Math.min(2, spans.filter(([a, b]) => t >= a - 2000 && t <= b + 2000).length));
 
   // Walk every beat of the song in order. Many beats have no off-beat objects and can't vote either
   // way; once a triplet section has started, those don't end it. Only a beat with clear straight
@@ -99,8 +119,10 @@ export function tripletBeats(diffs) {
   const state = b => {
     const v = votes.get(nearKey(votes, Math.round(b.start)));
     if (!v) return null;
-    const need = needAt(b.start);
-    return v.T >= need && v.T > v.B ? 'T' : v.B >= need && v.B > v.T ? 'B' : null; // weak or tied: no evidence
+    // two difficulties must agree, or one where it's the only one mapping this part of the song;
+    // the weighted votes decide between triplet and straight
+    const need = Math.max(1, Math.min(2, per.filter(p => covers(p, b.start)).length));
+    return v.T >= need && v.wT > v.wB ? 'T' : v.B >= need && v.wB > v.wT ? 'B' : null; // weak or tied: no evidence
   };
   const out = [];
   let lastT = -1; // index of the latest triplet beat in the current section

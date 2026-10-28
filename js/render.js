@@ -266,7 +266,12 @@ export class ErrorMeter extends CanvasView {
 // ---------------------------------------------------------------- scatter
 
 export class Scatter extends CanvasView {
-  /** @param {{hits, misses, x0, x1, windows, sectionStarts?: number[]}} s */
+  /** Pixel x (CSS px) of song time t in the last drawn chart. */
+  xFor(t) { const m = this.map; return m ? m.padL + ((t - m.x0) / m.span) * m.pw : 0; }
+  /** Song time at pixel x in the last drawn chart (clamped to the plot). */
+  timeAt(x) { const m = this.map; return m ? m.x0 + Math.min(1, Math.max(0, (x - m.padL) / m.pw)) * m.span : 0; }
+
+  /** @param {{hits, misses, x0, x1, windows, sectionStarts?: number[], timeAxis?: boolean}} s */
   draw(s) {
     this.last = s;
     const { g, w, h } = this, c = colors();
@@ -275,6 +280,7 @@ export class Scatter extends CanvasView {
     const range = Math.ceil((s.windows.good * 1.6) / 10) * 10;
     const pw = w - padL - padR, ph = h - padT - padB;
     const span = Math.max(1, s.x1 - s.x0);
+    this.map = { x0: s.x0, span, padL, pw };
     const toX = t => padL + ((t - s.x0) / span) * pw;
     const toY = e => padT + ph / 2 - (Math.max(-range, Math.min(range, e)) / range) * (ph / 2);
 
@@ -292,6 +298,17 @@ export class Scatter extends CanvasView {
     }
     g.save(); g.translate(10, padT + ph / 2); g.rotate(-Math.PI / 2); g.textAlign = 'center';
     g.fillText('ms (early ↓ / late ↑)', 0, 0); g.restore();
+
+    // time axis (song position)
+    if (s.timeAxis) {
+      const step = [5, 10, 15, 30, 60, 120, 300].find(sec => span / (sec * 1000) <= 10) * 1000 || 600000;
+      g.textAlign = 'center'; g.fillStyle = c.faint;
+      for (let t = Math.ceil(s.x0 / step) * step; t <= s.x1; t += step) {
+        const x = toX(t), sec = Math.round(t / 1000);
+        g.fillRect(Math.round(x), padT + ph, 1, 3);
+        g.fillText(`${Math.floor(sec / 60)}:${String(sec % 60).padStart(2, '0')}`, Math.min(w - padR - 12, Math.max(padL + 12, x)), h - 3);
+      }
+    }
 
     if (s.sectionStarts) {
       g.strokeStyle = alpha(c.accent, 0.35); g.setLineDash([3, 4]);

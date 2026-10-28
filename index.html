@@ -210,7 +210,15 @@
           <div class="now-bpm"><span id="bpmNow">—</span><small>BPM</small></div>
           <div class="now-pos" id="posNow">Ready</div>
         </div>
-        <div class="progress" id="progress" hidden><div id="progressBar"></div></div>
+      </div>
+
+      <div class="panel chart">
+        <div class="chart-head"><span>Timing over time</span><small id="chartHint">each dot is a hit, the line is the moving average</small></div>
+        <div class="chart-plot" id="chartPlot">
+          <canvas id="scatter"></canvas>
+          <div class="playhead" id="playhead" hidden></div>
+          <div class="seek-ghost" id="seekGhost" hidden><span id="seekTime"></span></div>
+        </div>
       </div>
 
       <div class="timeline-wrap panel">
@@ -246,10 +254,6 @@
         <span class="count extra" title="A second stroke on a grid note that was already played"><b>0</b> doubled</span>
       </div>
 
-      <div class="panel chart">
-        <div class="chart-head"><span>Timing over time</span><small>each dot is a hit, the line is the moving average</small></div>
-        <canvas id="scatter"></canvas>
-      </div>
     </section>
   </main>
 

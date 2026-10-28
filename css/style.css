@@ -215,8 +215,6 @@ input[type=range] { width: 100%; accent-color: var(--accent); margin: 6px 0 2px;
 .now-bpm span { font-size: 30px; font-weight: 700; font-variant-numeric: tabular-nums; }
 .now-bpm small { margin-left: 5px; }
 .now-pos { color: var(--muted); font-family: var(--mono); font-size: 14px; }
-.progress { position: absolute; left: 0; right: 0; bottom: 0; height: 3px; background: var(--panel-2); }
-.progress div { height: 100%; width: 0; background: var(--accent); }
 
 .timeline-wrap { position: relative; height: 290px; overflow: hidden; }
 .stage-bg { position: absolute; inset: 0; background: center/cover; opacity: .16; filter: blur(2px) saturate(.8); transition: opacity .4s; }
@@ -262,7 +260,12 @@ input[type=range] { width: 100%; accent-color: var(--accent); margin: 6px 0 2px;
 .chart { padding: 12px 16px 14px; }
 .chart-head { display: flex; justify-content: space-between; align-items: baseline; gap: 10px; font-size: 13px; color: var(--muted); margin-bottom: 6px; flex-wrap: wrap; }
 .chart-head span { color: var(--text); font-weight: 600; }
-#scatter { width: 100%; height: 190px; display: block; }
+#scatter { width: 100%; height: 160px; display: block; }
+.chart-plot { position: relative; }
+.chart-plot.seekable { cursor: pointer; }
+.playhead { position: absolute; top: 8px; bottom: 18px; width: 2px; margin-left: -1px; background: var(--accent); box-shadow: 0 0 8px var(--accent); pointer-events: none; }
+.seek-ghost { position: absolute; top: 8px; bottom: 18px; border-left: 1px dashed var(--text); pointer-events: none; }
+.seek-ghost span { position: absolute; top: -4px; left: 5px; font: 11px var(--mono); color: var(--text); background: var(--raised); border: 1px solid var(--border); border-radius: 4px; padding: 0 4px; white-space: nowrap; }
 
 .foot { text-align: center; color: var(--faint); font-size: 12.5px; padding: 6px 22px 22px; }
 

@@ -271,7 +271,6 @@ async function startSession({ preview = false, from = null } = {}) {
   $('startBtn').textContent = 'Stop';
   $('startBtn').classList.replace('primary', 'stop');
   $('idleHint').hidden = true;
-  $('progress').hidden = session.mode !== 'song';
   lockSetup(true, preview ? $('tempoBox') : null);
 }
 
@@ -323,6 +322,7 @@ function frame() {
     if (s.scatterDirty && perfNow - s.lastScatter > 250) drawScatter(s);
     if (s.mode === 'song' && now > s.endMs + 400) stopSession(true);
   }
+  updatePlayhead();
 
   const windows = s?.windows || STRICTNESS[settings.strictness] || STRICTNESS.normal;
   const last = recent.filter(h => h.j !== MISS).slice(-12);
@@ -337,9 +337,10 @@ function frame() {
 requestAnimationFrame(frame);
 
 function scatterRange(s) {
+  // songs: the whole song, so the playhead shows the position; metronome: the session so far
+  if (s.mode === 'song') return { x0: 0, x1: s.endMs };
   const x0 = s.scoreFrom;
-  const x1 = s.mode === 'song' ? s.endMs : Math.max(s.now, x0 + 30000);
-  return { x0, x1 };
+  return { x0, x1: Math.max(s.now, x0 + 30000) };
 }
 
 function drawScatter(s, final = false) {
@@ -350,7 +351,90 @@ function drawScatter(s, final = false) {
     hits: s.scorer.hits, misses: s.scorer.misses, notes: s.notes, windows: s.windows,
     x0, x1: final && s.mode !== 'song' ? Math.max(x0 + 1000, s.now) : x1,
     sectionStarts: s.sections.length > 1 ? s.sections.map(x => x.start) : null,
+    timeAxis: s.mode === 'song',
   });
+}
+
+/** Empty chart spanning the loaded song, so the playhead and seeking work before playing. */
+function drawSongChart() {
+  if (session || settings.mode !== 'song' || !song?.diff) return;
+  const t = song.diff.timing;
+  scatter.draw({
+    hits: [], misses: [], windows: STRICTNESS[settings.strictness] || STRICTNESS.normal,
+    x0: 0, x1: song.durationMs, timeAxis: true,
+    sectionStarts: t.length > 1 ? t.map(r => r.time) : null,
+  });
+}
+
+// ---- playhead and seeking on the timing chart
+
+/** Seeking is allowed while stopped, during a preview, and in a session before the first stroke. */
+function canSeek() {
+  if (settings.mode !== 'song' || !song?.diff) return false;
+  if (!session) return true;
+  if (session.mode !== 'song') return false;
+  const sc = session.scorer;
+  return session.preview || sc.hits.length + sc.misses.length + sc.extras.length === 0;
+}
+
+let chartState = null;
+function updatePlayhead() {
+  const ph = $('playhead');
+  let t = null;
+  if (session?.mode === 'song') t = session.now;
+  else if (!session && settings.mode === 'song' && song?.diff && scatter.last?.timeAxis) t = songPrefs().startAt;
+  ph.hidden = t == null;
+  if (t != null) ph.style.left = `${scatter.xFor(clamp(t, 0, song?.durationMs ?? t))}px`;
+  const seekable = canSeek(), state = `${seekable}|${!!session}`;
+  if (state !== chartState) {
+    chartState = state;
+    $('chartPlot').classList.toggle('seekable', seekable);
+    $('chartHint').textContent = seekable
+      ? (session ? 'click or drag to jump (until you play your first note)' : 'click or drag to choose where to start')
+      : 'each dot is a hit, the line is the moving average';
+    if (!seekable) $('seekGhost').hidden = true;
+  }
+}
+
+function seekTo(ms) {
+  ms = clamp(Math.round(ms / 100) * 100, 0, Math.max(0, Math.floor((song.durationMs - 3000) / 100) * 100));
+  if (session) {
+    const preview = session.preview;
+    stopSession(false);
+    resetLive();
+    startSession({ preview, from: ms });
+  } else {
+    songPrefs().startAt = ms;
+    save();
+    $('startAt').value = ms;
+    $('startAtLabel').textContent = fmtTime(ms);
+  }
+}
+
+{
+  const plot = $('chartPlot'), ghost = $('seekGhost');
+  let dragging = false;
+  const xOf = e => e.clientX - plot.getBoundingClientRect().left;
+  const showGhost = e => {
+    const t = scatter.timeAt(xOf(e));
+    ghost.hidden = false;
+    ghost.style.left = `${scatter.xFor(t)}px`;
+    $('seekTime').textContent = fmtTime(t);
+  };
+  plot.addEventListener('pointerdown', e => {
+    if (!canSeek()) return;
+    dragging = true;
+    plot.setPointerCapture(e.pointerId);
+    showGhost(e);
+  });
+  plot.addEventListener('pointermove', e => { if (canSeek()) showGhost(e); else ghost.hidden = true; });
+  plot.addEventListener('pointerup', e => {
+    if (!dragging) return;
+    dragging = false;
+    ghost.hidden = true;
+    if (canSeek()) seekTo(scatter.timeAt(xOf(e)));
+  });
+  plot.addEventListener('pointerleave', () => { if (!dragging) ghost.hidden = true; });
 }
 
 function tendency(m) {
@@ -375,7 +459,6 @@ function updateLive(s) {
   $('bpmNow').textContent = +((60000 / sec.beatLength) * s.rate).toFixed(1);
   if (s.mode === 'song') {
     $('posNow').textContent = `${fmtTime(now)} / ${fmtTime(s.endMs)}`;
-    $('progressBar').style.width = `${clamp((now - s.startPos) / (s.endMs - s.startPos), 0, 1) * 100}%`;
   } else {
     const bi = lowerBound(s.beats, now + 1) - 1;
     const b = s.beats[Math.max(0, bi)];
@@ -536,6 +619,7 @@ function showResults(s) {
     hits: s.scorer.hits, misses: s.scorer.misses, notes: s.notes, windows: s.windows,
     x0, x1: s.mode === 'song' ? s.endMs : Math.max(x0 + 1000, s.now),
     sectionStarts: s.sections.length > 1 ? s.sections.map(x => x.start) : null,
+    timeAxis: s.mode === 'song',
   });
   new Histogram($('resHist')).draw({ hits: s.scorer.hits, windows: s.windows, mean: st.nHits ? st.mean : null });
 }
@@ -634,6 +718,7 @@ async function loadSong(list, { fromLibrary = false } = {}) {
     renderSongInfo();
     renderLibrary();
     updateStartButton();
+    drawSongChart();
   }
 }
 
@@ -999,6 +1084,7 @@ function setMode(mode) {
   $('songPane').hidden = mode !== 'song';
   $('libraryPane').hidden = mode !== 'song';
   renderAutoInfo();
+  drawSongChart();
   syncClickControls();
   renderSongInfo();
   updateStartButton();
@@ -1360,4 +1446,4 @@ renderLibrary().then(async () => {
 });
 
 // Handy for debugging from the browser console.
-window.drumcoach = { audio, midi, settings, get session() { return session; }, get song() { return song; } };
+window.drumcoach = { audio, midi, settings, scatter, get session() { return session; }, get song() { return song; } };

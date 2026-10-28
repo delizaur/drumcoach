@@ -352,6 +352,7 @@ function drawScatter(s, final = false) {
     hits: s.scorer.hits, misses: s.scorer.misses, notes: s.notes, windows: s.windows,
     x0, x1: final && s.mode !== 'song' ? Math.max(x0 + 1000, s.now) : x1,
     sectionStarts: s.sections.length > 1 ? s.sections.map(x => x.start) : null,
+    tripletSections: s.tripletSections,
     timeAxis: s.mode === 'song',
   });
 }
@@ -364,6 +365,8 @@ function drawSongChart() {
     hits: [], misses: [], windows: STRICTNESS[settings.strictness] || STRICTNESS.normal,
     x0: 0, x1: song.durationMs, timeAxis: true,
     sectionStarts: t.length > 1 ? t.map(r => r.time) : null,
+    tripletSections: settings.useTriplets && song.triplets?.length
+      ? mergeBeats(song.triplets).map(f => ({ start: f.start + totalSync(), end: f.end + totalSync() })) : null,
   });
 }
 
@@ -620,6 +623,7 @@ function showResults(s) {
     hits: s.scorer.hits, misses: s.scorer.misses, notes: s.notes, windows: s.windows,
     x0, x1: s.mode === 'song' ? s.endMs : Math.max(x0 + 1000, s.now),
     sectionStarts: s.sections.length > 1 ? s.sections.map(x => x.start) : null,
+    tripletSections: s.tripletSections,
     timeAxis: s.mode === 'song',
   });
   new Histogram($('resHist')).draw({ hits: s.scorer.hits, windows: s.windows, mean: st.nHits ? st.mean : null });
@@ -1147,7 +1151,7 @@ $('rateLabel').textContent = `${settings.rate.toFixed(2)}×`;
 bind('musicVolume', 'musicVolume', { after: v => audio.setMusicVolume(v) });
 bind('clickVolume', 'clickVolume', { after: v => audio.setClickVolume(v) });
 bind('songClick', 'songClick', { event: 'change', after: syncClickControls });
-bind('useTriplets', 'useTriplets', { event: 'change', after: renderAutoInfo });
+bind('useTriplets', 'useTriplets', { event: 'change', after: () => { renderAutoInfo(); drawSongChart(); } });
 /** Click type and volume only matter in song mode when the click track is on. */
 // Collapsible sections remember whether they were open.
 for (const id of ['playalongGroup', 'libraryBox']) {

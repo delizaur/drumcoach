@@ -284,7 +284,7 @@ export class Scatter extends CanvasView {
   /** Song time at pixel x in the last drawn chart (clamped to the plot). */
   timeAt(x) { const m = this.map; return m ? m.x0 + Math.min(1, Math.max(0, (x - m.padL) / m.pw)) * m.span : 0; }
 
-  /** @param {{hits, misses, x0, x1, windows, sectionStarts?: number[], timeAxis?: boolean}} s */
+  /** @param {{hits, misses, x0, x1, windows, sectionStarts?: number[], tripletSections?: {start, end}[], timeAxis?: boolean}} s */
   draw(s) {
     this.last = s;
     const { g, w, h } = this, c = colors();
@@ -335,6 +335,18 @@ export class Scatter extends CanvasView {
         const x = toX(t), sec = Math.round(t / 1000);
         g.fillRect(Math.round(x), padT + ph, 1, 3);
         g.fillText(`${Math.floor(sec / 60)}:${String(sec % 60).padStart(2, '0')}`, Math.min(w - padR - 12, Math.max(padL + 12, x)), h - 3);
+      }
+    }
+
+    // triplet sections, highlighted like in the scrolling timeline
+    if (s.tripletSections?.length) {
+      g.font = '600 10px system-ui'; g.textAlign = 'left';
+      for (const f of s.tripletSections) {
+        if (f.end < s.x0 || f.start > s.x1) continue;
+        const x0 = px(f.start), x1 = px(f.end);
+        g.fillStyle = alpha(c.judge[2], 0.1);
+        g.fillRect(x0, padT, Math.max(1, x1 - x0), ph);
+        if (x1 - x0 > 56) { g.fillStyle = alpha(c.judge[2], 0.85); g.fillText('TRIPLETS', x0 + 4, padT + 11); }
       }
     }
 

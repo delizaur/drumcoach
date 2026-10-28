@@ -1,11 +1,12 @@
-// Automatic rhythm grid for beatmaps: finds beats that need finer subdivisions than the default
-// grid (8ths with 16ths allowed). It only ever adds positions, never removes them: beatmaps simplify
-// rhythms for gameplay and often follow guitar or vocals, so a beat mapped with quarters can still
-// have 8th-note hi-hats on the drums.
+// Automatic rhythm grid for beatmaps: finds the triplet beats that also need sextuplet positions.
+// Straight beats keep the plain grid (8ths with 16ths allowed, or 8ths on fast sections, see main.js):
+// osu! maps often have short 1/8 bursts that follow guitar or vocals, and switching the grid to 32nds
+// for single beats made it jumpy and narrowed the hit windows around them.
 //
 // Only the detailed difficulties count (at least 60% of the most detailed one's off-beat objects),
 // since easier ones simplify the rhythm, and a beat needs at least two of them to agree, so a single
-// overmapped difficulty can't add positions on its own.
+// overmapped difficulty can't add positions on its own. It only ever adds positions: beatmaps
+// simplify rhythms, so a beat mapped with triplets can still have sextuplets on the drums.
 import { snapAt, nearKey } from './triplets.js';
 
 const DETAILED_SHARE = 0.6;
@@ -16,8 +17,7 @@ const sameTiming = (a, b) => a.length === b.length && a.every((r, i) =>
 /**
  * @param {{timing: object[], objects: number[]}[]} diffs
  * @param {{start: number}[]} tripletBeats beats already detected as triplets (map time)
- * @returns {{sextuplets: {start, end}[], thirtySeconds: {start, end}[]}} beats (map time) that get
- *   sextuplet positions (inside triplet beats) or 32nd-note positions (in straight beats)
+ * @returns {{sextuplets: {start, end}[]}} triplet beats (map time) that get sextuplet positions
  */
 export function finerBeats(diffs, tripletBeats) {
   // Snaps only mean the same thing between difficulties with the same timing points; some mapsets
@@ -37,10 +37,10 @@ export function finerBeats(diffs, tripletBeats) {
     }
     return { beats, offbeat, span: [Math.min(...d.objects), Math.max(...d.objects)] };
   });
-  if (!per.length) return { sextuplets: [], thirtySeconds: [] };
+  if (!per.length) return { sextuplets: [] };
   const most = Math.max(...per.map(p => p.offbeat));
   const detailed = per.filter(p => p.offbeat > 0 && p.offbeat >= DETAILED_SHARE * most);
-  if (!detailed.length) return { sextuplets: [], thirtySeconds: [] };
+  if (!detailed.length) return { sextuplets: [] };
   // two must agree, unless only one detailed difficulty maps that part of the song
   const needAt = t => Math.max(1, Math.min(2, detailed.filter(({ span: [a, b] }) => t >= a - 2000 && t <= b + 2000).length));
 
@@ -50,14 +50,13 @@ export function finerBeats(diffs, tripletBeats) {
   const beatOf = (p, key) => p.beats.get(nearKey(p.beats, key));
   const agreed = (key, snaps) => detailed.filter(p => snaps.some(s => beatOf(p, key)?.snaps.has(s))).length >= needAt(key);
 
-  const sextuplets = [], thirtySeconds = [];
+  const sextuplets = [];
   const keys = new Map();
   for (const p of detailed) for (const k of p.beats.keys()) keys.set(nearKey(keys, k), true);
   for (const key of [...keys.keys()].sort((a, b) => a - b)) {
     const b = detailed.map(p => beatOf(p, key)).find(Boolean);
     const beat = { start: b.start, end: b.start + b.len };
-    if (isTriplet(key)) { if (agreed(key, [6, 12])) sextuplets.push(beat); }
-    else if (agreed(key, [8, 16])) thirtySeconds.push(beat);
+    if (isTriplet(key) && agreed(key, [6, 12])) sextuplets.push(beat);
   }
-  return { sextuplets, thirtySeconds };
+  return { sextuplets };
 }

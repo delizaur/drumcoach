@@ -4,7 +4,7 @@ import { readZip } from './zip.js';
 import { loadBeatmapSet, songKey, tempoSummary } from './osu.js';
 import { analyzeSync, SYNC_VERSION } from './beatsync.js';
 import { detectTempo, TEMPO_VERSION } from './tempo.js';
-import { PATTERNS, makePattern, songSections, metronomeSections, buildGrid, sectionAt, TRIPLET_SLOT, SEXTUPLET_SLOT, FINE_SLOT } from './timing.js';
+import { PATTERNS, makePattern, songSections, metronomeSections, buildGrid, sectionAt, TRIPLET_SLOT, SEXTUPLET_SLOT } from './timing.js';
 import { finerBeats } from './autogrid.js';
 import { tripletBeats, mergeBeats } from './triplets.js';
 import { Scorer, STRICTNESS, JUDGMENTS, MISS } from './scorer.js';
@@ -153,6 +153,11 @@ function stroke(perfTime, note) {
 
 // ================================================================ session
 
+// The automatic grid uses plain 8ths on sections faster than this. Same slots as the 16th grid
+// (subdivision 4), so the results group them with the 8ths of slower sections.
+const AUTO_FAST_BPM = 200;
+const AUTO_FAST = makePattern({ id: 'auto-fast', name: '8ths', subdiv: 4, grid: 'x.x.' });
+
 function currentPattern() {
   const def = PATTERNS.find(p => p.id === settings.pattern) || PATTERNS[0];
   if (def.id === 'custom') {
@@ -199,7 +204,7 @@ async function startSession({ preview = false, from = null } = {}) {
   const pattern = currentPattern();
   const windows = STRICTNESS[settings.strictness] || STRICTNESS.normal;
   let sections, startPos = 0, rate = 1, scoreFrom, endMs = Infinity, buffer = null, hiddenBar = null, triplets = [];
-  let sextuplets = [], thirtySeconds = [];
+  let sextuplets = [];
   let clickMode = settings.clickMode;
 
   if (settings.mode === 'song') {
@@ -217,10 +222,8 @@ async function startSession({ preview = false, from = null } = {}) {
     if (settings.useTriplets && song.triplets?.length) {
       triplets = song.triplets.map(b => ({ start: b.start + shift, end: b.end + shift }));
     }
-    if (settings.pattern === 'auto' && song.finer) {
-      const move = b => ({ start: b.start + shift, end: b.end + shift });
-      if (triplets.length) sextuplets = song.finer.sextuplets.map(move);
-      thirtySeconds = song.finer.thirtySeconds.map(move);
+    if (settings.pattern === 'auto' && song.finer && triplets.length) {
+      sextuplets = song.finer.sextuplets.map(b => ({ start: b.start + shift, end: b.end + shift }));
     }
     if (!sections.length) return showSongError('This difficulty has no timing points inside the audio.');
     startPos = clamp(from ?? prefs.startAt, 0, Math.max(0, endMs - 3000));
@@ -241,7 +244,9 @@ async function startSession({ preview = false, from = null } = {}) {
     }
   }
 
-  const grid = buildGrid(sections, pattern, { tripletBeats: triplets, sextupletBeats: sextuplets, fineBeats: thirtySeconds });
+  // the automatic grid drops the 16ths on fast sections (real tempo, after the playback rate)
+  const patternFor = settings.pattern === 'auto' ? s => 60000 / s.beatLength * rate > AUTO_FAST_BPM ? AUTO_FAST : pattern : null;
+  const grid = buildGrid(sections, pattern, { tripletBeats: triplets, sextupletBeats: sextuplets, patternFor });
   session = {
     preview,
     mode: settings.mode,
@@ -555,7 +560,6 @@ function showResults(s) {
   slotLabel.set(TRIPLET_SLOT + 1, 'trip (fills)');
   slotLabel.set(TRIPLET_SLOT + 2, 'let (fills)');
   for (let k = 1; k <= 3; k++) slotLabel.set(SEXTUPLET_SLOT + k, 'sextuplet (fills)');
-  for (let k = 1; k <= 4; k++) slotLabel.set(FINE_SLOT + k, '32nd');
   // group by label, so positions that share one (e.g. the three sextuplet positions) form one row
   const labelOf = slot => slotLabel.get(slot) || `slot ${slot}`;
   const firstSlot = new Map();
@@ -1177,18 +1181,17 @@ function renderAutoInfo() {
   el.hidden = settings.pattern !== 'auto';
   if (el.hidden) return;
   if (settings.mode !== 'song' || !song?.diff || song.diff.plain) {
-    el.textContent = 'Without a beatmap this works like "8ths, 16ths allowed".';
+    el.textContent = `Without a beatmap this works like "8ths, 16ths allowed", with only 8ths above ${AUTO_FAST_BPM} BPM.`;
     return;
   }
   const parts = [];
   const fills = mergeBeats(song.triplets || []).length;
   if (fills && settings.useTriplets) parts.push(`triplets in ${fills} section${fills > 1 ? 's' : ''}`);
-  const sext = settings.useTriplets ? song.finer?.sextuplets.length || 0 : 0, fine = song.finer?.thirtySeconds.length || 0;
+  const sext = settings.useTriplets ? song.finer?.sextuplets.length || 0 : 0;
   if (sext) parts.push(`sextuplets in ${sext} beat${sext > 1 ? 's' : ''}`);
-  if (fine) parts.push(`32nd notes in ${fine} beat${fine > 1 ? 's' : ''}`);
-  el.textContent = parts.length
-    ? `8ths and 16ths, plus from this beatmap: ${parts.join(', ')}.`
-    : 'This beatmap needs nothing beyond 8ths and 16ths.';
+  el.textContent = `8ths and 16ths (only 8ths above ${AUTO_FAST_BPM} BPM)` + (parts.length
+    ? `, plus from this beatmap: ${parts.join(', ')}.`
+    : '. This beatmap needs nothing else.');
 }
 
 function renderPattern() {

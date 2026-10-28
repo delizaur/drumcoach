@@ -12,7 +12,7 @@ It's a fully static site: no backend, no build step, no dependencies. Everything
 - **Song mode with osu! beatmaps.** Drop an `.osz` file, an unpacked beatmap folder (or several, even your whole osu! `Songs` folder), or an `.osu` plus its audio. The app plays the song and follows every uninherited timing point (BPM, offset, meter). Hit objects are ignored. You can choose the start position and playback speed, and set a timing offset for each song.
 - **Triplet fills from beatmaps:** the hit objects of all difficulties are checked for how they are snapped. Beats where at least two difficulties use triplet snaps (1/3, 1/6, 1/12) and outvote straight snaps get a triplet grid instead of your chosen one; on the timeline they are shaded and labelled. Can be switched off in the playalong settings (`js/triplets.js`).
 - **Any audio file, no map needed:** drop an MP3 (or OGG, WAV, ...) without an `.osu` and the tempo is detected from the audio (`js/tempo.js`). You get the best three tempo options, ×2 / ÷2, a half-beat shift, beats per bar and bar start, plus a preview with the click track to confirm by ear. Works for songs with a steady tempo; tested on 99 constant-tempo osu! maps, the right grid was among the options for 97, typically within 1 ms.
-- **Automatic rhythm grid (default):** 8ths with 16ths allowed everywhere, plus whatever finer subdivisions the beatmap uses: the triplet fills, sextuplets inside them, and 32nd notes, wherever at least two of the detailed difficulties (60%+ of the most detailed one's off-beat notes) agree. It only ever adds positions, since beatmaps simplify rhythms and often follow guitar or vocals rather than the drums (`js/autogrid.js`).
+- **Automatic rhythm grid (default):** 8ths with 16ths allowed in straight sections (only 8ths above 200 BPM), triplets in the triplet sections, and sextuplets inside them wherever at least two of the detailed difficulties (60%+ of the most detailed one's off-beat notes) agree (`js/autogrid.js`). Straight sections never switch to 32nds: beatmaps often have short 1/8 bursts that follow guitar or vocals, and a grid that changes every few beats is hard to read.
 - **Rhythm grids:** hybrid grids (the default is 8ths with 16ths allowed, plus quarters with 8ths, and 8ths with triplets), quarters, halves, 8ths, off-beats, triplets, swing, 16ths, gallops, sextuplets, backbeat, son clave, or your own grid (for example `x..x..x.` in 16ths).
 - **Feedback:** a scrolling timeline with a lane per drum (cymbals, hi-hat, toms, snare, kick, top to bottom as in drum notation), an osu!-style hit-error meter, live accuracy / mean offset / consistency (σ and UR), a timing-over-time chart, and an end-of-session report broken down by drum, subdivision and tempo.
 - **Latency calibration:** tap along to a click and the app measures your whole setup's offset (kit → USB → browser → speakers → ears).
@@ -64,7 +64,7 @@ js/beatsync.js    automatic beat-grid alignment from the audio
 js/tempo.js       tempo and beat-grid detection for songs without a map
 js/timing.js      tempo sections, rhythm patterns, expected-note grid
 js/triplets.js    triplet fills from beatmap hit objects
-js/autogrid.js    finer subdivisions (sextuplets, 32nds) for the automatic grid
+js/autogrid.js    sextuplet beats for the automatic grid
 js/scorer.js      hit matching, judgments, statistics
 js/render.js      canvas views (timeline, error meter, charts)
 js/calibration.js latency calibration

@@ -22,6 +22,19 @@ function redLineAt(timing, t) {
 }
 
 /**
+ * Snap of a hit object at time t: the coarsest division of the beat it sits on (1 = on the beat,
+ * 2 = halfway, 3 = a third, ...), plus the start and length of its beat. snap is null if unsnapped.
+ */
+export function snapAt(timing, t) {
+  const r = redLineAt(timing, t);
+  const pos = (t - r.time) / r.beatLength;
+  let beat = Math.floor(pos), frac = pos - beat;
+  if (frac > 1 - TOL / r.beatLength) { beat++; frac = 0; } // a hair before the next beat
+  const snap = SNAPS.find(s => Math.abs(frac * s - Math.round(frac * s)) * r.beatLength / s <= TOL) ?? null;
+  return { snap, start: r.time + beat * r.beatLength, len: r.beatLength };
+}
+
+/**
  * @param {{timing: object[], objects: number[]}[]} diffs
  * @returns {{start: number, end: number}[]} triplet beats in map time (ms), sorted
  */
@@ -32,16 +45,12 @@ export function tripletBeats(diffs) {
     if (!d.objects?.length || !d.timing?.length) continue;
     const seen = new Map();
     for (const t of d.objects) {
-      const r = redLineAt(d.timing, t);
-      const pos = (t - r.time) / r.beatLength;
-      let beat = Math.floor(pos), frac = pos - beat;
-      if (frac > 1 - TOL / r.beatLength) { beat++; frac = 0; } // a hair before the next beat
-      const snap = SNAPS.find(s => Math.abs(frac * s - Math.round(frac * s)) * r.beatLength / s <= TOL);
+      const { snap, start, len } = snapAt(d.timing, t);
       if (!snap || snap === 1) continue; // on the beat (or unsnapped): says nothing
-      const start = r.time + beat * r.beatLength, key = Math.round(start);
+      const key = Math.round(start);
       const kind = TERNARY.has(snap) ? 'T' : 'B';
       const prev = seen.get(key);
-      seen.set(key, { kind: prev && prev.kind !== kind ? 'B' : kind, start, len: r.beatLength }); // mixed counts as straight
+      seen.set(key, { kind: prev && prev.kind !== kind ? 'B' : kind, start, len }); // mixed counts as straight
     }
     if (seen.size) voters++;
     for (const [key, v] of seen) {

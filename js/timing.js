@@ -9,6 +9,7 @@
  * they're within the good window, and only fall back to the finer notes (e.g. 16ths) otherwise.
  */
 export const PATTERNS = [
+  { id: 'auto', name: 'Automatic (from the beatmap)', subdiv: 4, grid: 'xxxx', primary: 'x.x.' },
   { id: 'hybrid-8-16', name: '8ths, 16ths allowed (hybrid)', subdiv: 4, grid: 'xxxx', primary: 'x.x.' },
   { id: 'hybrid-4-8', name: 'Quarters, 8ths allowed (hybrid)', subdiv: 2, grid: 'xx', primary: 'x.' },
   { id: 'hybrid-8-trip', name: '8ths, triplets allowed (hybrid)', subdiv: 6, grid: 'x.xxx.', primary: 'x..x..' },
@@ -88,8 +89,12 @@ export function metronomeSections({ bpm, meter, countIn = 0, trainer = null, dur
 /**
  * @param {{start:number, end:number}[]} [opts.tripletBeats] beats (song ms) whose subdivisions are
  *   replaced by triplets, e.g. drum fills found in a beatmap
+ * @param {{start:number, end:number}[]} [opts.sextupletBeats] triplet beats that also get sextuplet
+ *   positions (as secondary notes), from the automatic grid
+ * @param {{start:number, end:number}[]} [opts.fineBeats] straight beats that also get 32nd-note
+ *   positions (as secondary notes), from the automatic grid
  */
-export function buildGrid(sections, pattern, { tripletBeats = [] } = {}) {
+export function buildGrid(sections, pattern, { tripletBeats = [], sextupletBeats = [], fineBeats = [] } = {}) {
   const EPS = 1; // ms; ignore beats that fall right on a section's end
   const beats = [], notes = [];
   let bar0 = 0;
@@ -130,7 +135,7 @@ export function buildGrid(sections, pattern, { tripletBeats = [] } = {}) {
     }
     bar0 += Math.max(1, Math.ceil((s.end - s.start - EPS) / barMs));
   });
-  if (!tripletBeats.length) return { beats, notes };
+  if (!tripletBeats.length && !sextupletBeats.length && !fineBeats.length) return { beats, notes };
 
   // Beats can be cut short by a timing point in the middle of them (common in maps of live
   // recordings): clip every special beat at its section's end and use that section's tempo.
@@ -144,7 +149,7 @@ export function buildGrid(sections, pattern, { tripletBeats = [] } = {}) {
   // In triplet beats, keep (or add) the note on the beat and replace everything in between with
   // the two triplet positions. All of them are primary notes, so hybrid snapping doesn't apply there.
   const inside = t => tripletBeats.some(b => t > b.start + EPS && t < b.end - EPS);
-  const out = notes.filter(n => !inside(n.t));
+  const out = tripletBeats.length ? notes.filter(n => !inside(n.t)) : notes;
   for (const b of tripletBeats) {
     const { sec, s, bl } = b, barMs = s.beatLength * s.meter;
     const beatPos = Math.round((b.start - s.start) / s.beatLength);
@@ -157,12 +162,30 @@ export function buildGrid(sections, pattern, { tripletBeats = [] } = {}) {
       out.push({ t: b.start + (k * bl) / 3, slot: TRIPLET_SLOT + k, primary: true, sec, bar: s.bar0 + Math.floor((b.start + (k * bl) / 3 - s.start) / barMs + 1e-9), onBeat: false, downbeat: false, triplet: true });
     }
   }
+  // Finer positions from the automatic grid, as secondary notes so the coarser ones are preferred.
+  const taken = new Set(out.map(n => Math.round(n.t)));
+  const addPositions = (list, fractions, slot0, flag) => {
+    for (const b of clip(list)) {
+      const { sec, s, bl } = b, barMs = s.beatLength * s.meter;
+      fractions.forEach((f, k) => {
+        const t = b.start + f * bl;
+        if (t >= b.end - EPS || taken.has(Math.round(t))) return;
+        taken.add(Math.round(t));
+        out.push({ t, slot: slot0 + k + 1, primary: false, sec, bar: s.bar0 + Math.floor((t - s.start) / barMs + 1e-9), onBeat: false, downbeat: false, [flag]: true });
+      });
+    }
+  };
+  addPositions(sextupletBeats, [1 / 6, 3 / 6, 5 / 6], SEXTUPLET_SLOT, 'triplet');
+  addPositions(fineBeats, [1 / 8, 3 / 8, 5 / 8, 7 / 8], FINE_SLOT, 'fine');
   out.sort((a, b) => a.t - b.t);
   return { beats, notes: out };
 }
 
 /** Slot ids of triplet-fill notes (TRIPLET_SLOT + 1 and + 2), kept apart from the pattern's slots. */
 export const TRIPLET_SLOT = 100;
+/** Slot ids of sextuplet (SEXTUPLET_SLOT + 1..3) and 32nd-note (FINE_SLOT + 1..4) positions. */
+export const SEXTUPLET_SLOT = 110;
+export const FINE_SLOT = 120;
 
 export function sectionAt(sections, t) {
   let lo = 0, hi = sections.length - 1, ans = 0;

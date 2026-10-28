@@ -4,7 +4,8 @@ import { readZip } from './zip.js';
 import { loadBeatmapSet, songKey, tempoSummary } from './osu.js';
 import { analyzeSync, SYNC_VERSION } from './beatsync.js';
 import { detectTempo, TEMPO_VERSION } from './tempo.js';
-import { PATTERNS, makePattern, songSections, metronomeSections, buildGrid, sectionAt, TRIPLET_SLOT } from './timing.js';
+import { PATTERNS, makePattern, songSections, metronomeSections, buildGrid, sectionAt, TRIPLET_SLOT, SEXTUPLET_SLOT, FINE_SLOT } from './timing.js';
+import { finerBeats } from './autogrid.js';
 import { tripletBeats, mergeBeats } from './triplets.js';
 import { Scorer, STRICTNESS, JUDGMENTS, MISS } from './scorer.js';
 import { Timeline, ErrorMeter, Scatter, Histogram, drawCalibStrip } from './render.js';
@@ -28,7 +29,7 @@ const DEFAULTS = {
   trainerOn: false, trainerStep: 5, trainerBars: 4, trainerMax: 180,
   gapOn: false, gapPlay: 2, gapMute: 2,
   // shared
-  pattern: 'hybrid-8-16', customSubdiv: 4, customGrid: 'x..x..x.',
+  pattern: 'auto', customSubdiv: 4, customGrid: 'x..x..x.',
   clickMode: 'beats', clickVolume: 0.7, strictness: 'normal',
   // song
   rate: 1, musicVolume: 0.85, songClick: false, lastSong: null, songPrefs: {},
@@ -198,6 +199,7 @@ async function startSession({ preview = false, from = null } = {}) {
   const pattern = currentPattern();
   const windows = STRICTNESS[settings.strictness] || STRICTNESS.normal;
   let sections, startPos = 0, rate = 1, scoreFrom, endMs = Infinity, buffer = null, hiddenBar = null, triplets = [];
+  let sextuplets = [], thirtySeconds = [];
   let clickMode = settings.clickMode;
 
   if (settings.mode === 'song') {
@@ -214,6 +216,11 @@ async function startSession({ preview = false, from = null } = {}) {
     sections = songSections(song.diff.timing, endMs, shift);
     if (settings.useTriplets && song.triplets?.length) {
       triplets = song.triplets.map(b => ({ start: b.start + shift, end: b.end + shift }));
+    }
+    if (settings.pattern === 'auto' && song.finer) {
+      const move = b => ({ start: b.start + shift, end: b.end + shift });
+      if (triplets.length) sextuplets = song.finer.sextuplets.map(move);
+      thirtySeconds = song.finer.thirtySeconds.map(move);
     }
     if (!sections.length) return showSongError('This difficulty has no timing points inside the audio.');
     startPos = clamp(from ?? prefs.startAt, 0, Math.max(0, endMs - 3000));
@@ -234,7 +241,7 @@ async function startSession({ preview = false, from = null } = {}) {
     }
   }
 
-  const grid = buildGrid(sections, pattern, { tripletBeats: triplets });
+  const grid = buildGrid(sections, pattern, { tripletBeats: triplets, sextupletBeats: sextuplets, fineBeats: thirtySeconds });
   session = {
     preview,
     mode: settings.mode,
@@ -460,9 +467,15 @@ function showResults(s) {
   const slotLabel = new Map(s.pattern.hits.map(h => [h.slot, h.label]));
   slotLabel.set(TRIPLET_SLOT + 1, 'trip (fills)');
   slotLabel.set(TRIPLET_SLOT + 2, 'let (fills)');
-  const slotRows = s.scorer.groupBy(h => s.notes[h.i].slot)
-    .sort((a, b) => a.key - b.key)
-    .map(r => ({ ...r, label: slotLabel.get(r.key) || `slot ${r.key}` }));
+  for (let k = 1; k <= 3; k++) slotLabel.set(SEXTUPLET_SLOT + k, 'sextuplet (fills)');
+  for (let k = 1; k <= 4; k++) slotLabel.set(FINE_SLOT + k, '32nd');
+  // group by label, so positions that share one (e.g. the three sextuplet positions) form one row
+  const labelOf = slot => slotLabel.get(slot) || `slot ${slot}`;
+  const firstSlot = new Map();
+  for (const n of s.notes) if (!firstSlot.has(labelOf(n.slot))) firstSlot.set(labelOf(n.slot), n.slot);
+  const slotRows = s.scorer.groupBy(h => labelOf(s.notes[h.i].slot))
+    .sort((a, b) => firstSlot.get(a.key) - firstSlot.get(b.key))
+    .map(r => ({ ...r, label: r.key }));
   const laneRows = s.scorer.groupBy(h => h.lane)
     .sort((a, b) => a.key - b.key)
     .map(r => ({ ...r, label: LANES[r.key] }));
@@ -595,7 +608,8 @@ async function loadSong(list, { fromLibrary = false } = {}) {
   try {
     const { diffs, keep } = await readSongSet(asItems(list));
     const next = { key: songKey(diffs[0]), diffs, diff: null, diffIndex: -1, buffer: null, audioName: null, durationMs: 0, bgName: null, bgUrl: null, sync: null, syncReady: null,
-      triplets: diffs[0].plain ? [] : tripletBeats(diffs) };
+      triplets: diffs[0].plain ? [] : tripletBeats(diffs), finer: null };
+    if (!next.diffs[0].plain) next.finer = finerBeats(next.diffs, next.triplets);
     const prefs = settings.songPrefs[next.key];
     await selectDifficulty(next, prefs && prefs.diff < diffs.length ? prefs.diff : 0);
     if (next.diff.plain) {
@@ -829,10 +843,11 @@ function renderSongInfo() {
     $('songMeta').textContent = `no beat found · ${fmtTime(song.durationMs)}`;
   }
   renderTempo();
+  renderAutoInfo();
   $('tripletRow').hidden = !!d.plain;
   const fills = mergeBeats(song.triplets || []);
   $('tripletInfo').textContent = d.plain ? '' : fills.length
-    ? `${fills.length} triplet section${fills.length > 1 ? 's' : ''} found in this beatmap (${fills.map(f => fmtTime(f.start)).join(', ')}).`
+    ? `${fills.length} triplet section${fills.length > 1 ? 's' : ''} found in this beatmap (${fills.slice(0, 6).map(f => fmtTime(f.start)).join(', ')}${fills.length > 6 ? ', …' : ''}).`
     : 'No triplet sections found in this beatmap.';
   renderSync();
 
@@ -983,6 +998,7 @@ function setMode(mode) {
   $('metronomePane').hidden = mode !== 'metronome';
   $('songPane').hidden = mode !== 'song';
   $('libraryPane').hidden = mode !== 'song';
+  renderAutoInfo();
   syncClickControls();
   renderSongInfo();
   updateStartButton();
@@ -1044,7 +1060,7 @@ $('rateLabel').textContent = `${settings.rate.toFixed(2)}×`;
 bind('musicVolume', 'musicVolume', { after: v => audio.setMusicVolume(v) });
 bind('clickVolume', 'clickVolume', { after: v => audio.setClickVolume(v) });
 bind('songClick', 'songClick', { event: 'change', after: syncClickControls });
-bind('useTriplets', 'useTriplets', { event: 'change' });
+bind('useTriplets', 'useTriplets', { event: 'change', after: renderAutoInfo });
 /** Click type and volume only matter in song mode when the click track is on. */
 // Collapsible sections remember whether they were open.
 for (const id of ['playalongGroup', 'libraryBox']) {
@@ -1064,7 +1080,28 @@ bind('pattern', 'pattern', { parse: String, event: 'change', after: renderPatter
 bind('customSubdiv', 'customSubdiv', { event: 'change', after: renderPattern });
 bind('customGrid', 'customGrid', { parse: String, after: renderPattern });
 
+/** What the automatic grid takes from the current beatmap (or that there's no beatmap). */
+function renderAutoInfo() {
+  const el = $('autoInfo');
+  el.hidden = settings.pattern !== 'auto';
+  if (el.hidden) return;
+  if (settings.mode !== 'song' || !song?.diff || song.diff.plain) {
+    el.textContent = 'Without a beatmap this works like "8ths, 16ths allowed".';
+    return;
+  }
+  const parts = [];
+  const fills = mergeBeats(song.triplets || []).length;
+  if (fills && settings.useTriplets) parts.push(`triplets in ${fills} section${fills > 1 ? 's' : ''}`);
+  const sext = settings.useTriplets ? song.finer?.sextuplets.length || 0 : 0, fine = song.finer?.thirtySeconds.length || 0;
+  if (sext) parts.push(`sextuplets in ${sext} beat${sext > 1 ? 's' : ''}`);
+  if (fine) parts.push(`32nd notes in ${fine} beat${fine > 1 ? 's' : ''}`);
+  el.textContent = parts.length
+    ? `8ths and 16ths, plus from this beatmap: ${parts.join(', ')}.`
+    : 'This beatmap needs nothing beyond 8ths and 16ths.';
+}
+
 function renderPattern() {
+  renderAutoInfo();
   $('customField').hidden = settings.pattern !== 'custom';
   const p = currentPattern();
   const el = $('patternPreview');

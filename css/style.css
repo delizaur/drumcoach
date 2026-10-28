@@ -312,6 +312,7 @@ input[type=range] { width: 100%; accent-color: var(--accent); margin: 6px 0 2px;
 .res-tiles { display: grid; grid-template-columns: repeat(4, minmax(0, 1fr)); gap: 12px; margin: 12px 0 16px; }
 .res-tiles .tile { background: var(--panel-2); }
 .res-tiles .tile-sub { white-space: normal; }
+.auto-info { color: var(--muted); font-size: 12px; }
 .triplet-info { display: block; color: var(--muted); font-size: 12px; margin: -2px 0 4px 46px; }
 .dropout-warn { background: rgba(255, 154, 77, .1); border: 1px solid rgba(255, 154, 77, .45); border-radius: var(--radius-sm); padding: 10px 14px; margin: 10px 0 4px; font-size: 13.5px; }
 .dropout-warn .btn { margin-left: 6px; }

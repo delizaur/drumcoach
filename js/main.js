@@ -1209,7 +1209,7 @@ function renderPattern() {
 function renderStrictness() {
   document.querySelectorAll('#strictness button').forEach(b => b.setAttribute('aria-checked', String(b.dataset.value === settings.strictness)));
   const w = STRICTNESS[settings.strictness];
-  $('windowsHint').textContent = `Perfect ±${w.perfect} · Great ±${w.great} · Good ±${w.good} ms (good is narrower on dense, fast grids)`;
+  $('windowsHint').textContent = `Perfect ±${w.perfect} · Great ±${w.great} · Good ±${w.good} ms. On dense or fast grids the windows shrink to fit the spacing, so the middle 30% between two grid notes is always a miss.`;
 }
 document.querySelectorAll('#strictness button').forEach(b => {
   b.onclick = () => { settings.strictness = b.dataset.value; save(); renderStrictness(); };

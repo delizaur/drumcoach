@@ -19,10 +19,14 @@ export const JUDGMENTS = ['perfect', 'great', 'good', 'miss'];
 export const MISS = 3;
 const WEIGHT = [1, 0.75, 0.45, 0];
 
-// On dense grids the good window shrinks to this share of the spacing to the neighbouring notes, so a
-// stroke a third of the way to the next 16th still counts as a miss (otherwise, at fast tempos every
-// moment is within the good window of some grid note and nothing can ever miss).
-const GOOD_SHARE = 0.35;
+// Windows scale with the grid spacing. Between two neighbouring grid notes, the windows cover at most
+// COVERED of the space, so the middle (30% of the gap, e.g. ±9 ms around the midpoint of two 16ths at
+// 200 BPM) is always a miss, however fast the tempo. In hybrid grids, primary notes (e.g. 8ths) get a
+// larger share of that space than the secondary ones (16ths), so a sloppy 8th isn't taken for a 16th.
+// When the good window shrinks, great and perfect shrink with it once they'd crowd it.
+const COVERED = 0.7;
+const PULL_PRIMARY = 3, PULL_SECONDARY = 2;
+const GREAT_SHARE = 0.75, PERFECT_SHARE = 0.5; // of the (shrunk) good window, at most
 const MAX_WINDOW = 150;  // strokes further than this past the first/last grid note are ignored
 const DOUBLE_TRIGGER = 35; // strokes on the same pad this close together count as one
 
@@ -47,22 +51,20 @@ export class Scorer {
     this.lastStroke = new Map(); // pad → time of its last stroke
   }
 
-  /** Good window (real ms) for grid note i: capped by the note's spacing, never below great. */
-  goodAt(i) {
-    const n = this.notes, w = this.windows, primary = this.hybrid && n[i].primary;
-    let gap = Infinity;
-    for (const d of [-1, 1]) {
-      // hybrid primary notes (8ths) are spaced by their own level, not by the 16ths between them
-      for (let j = i + d; j >= 0 && j < n.length; j += d) {
-        if (!primary || n[j].primary) { gap = Math.min(gap, Math.abs(n[j].t - n[i].t)); break; }
-      }
-    }
-    return Math.max(w.great, Math.min(w.good, (GOOD_SHARE * gap) / this.rate));
+  pull(i) { return this.hybrid && !this.notes[i].primary ? PULL_SECONDARY : PULL_PRIMARY; }
+
+  /** Windows (± real ms) of grid note i on one side (d = -1 early, +1 late), scaled to the spacing. */
+  windowsAt(i, d) {
+    const n = this.notes, w = this.windows, k = i + d;
+    if (k < 0 || k >= n.length) return w;
+    const reach = COVERED * Math.abs(n[k].t - n[i].t) * this.pull(i) / (this.pull(i) + this.pull(k));
+    const good = Math.min(w.good, reach / this.rate);
+    return { perfect: Math.min(w.perfect, PERFECT_SHARE * good), great: Math.min(w.great, GREAT_SHARE * good), good };
   }
 
   classify(errMs, i) {
-    const a = Math.abs(errMs), w = this.windows;
-    return a <= w.perfect ? 0 : a <= w.great ? 1 : a <= this.goodAt(i) ? 2 : MISS;
+    const a = Math.abs(errMs), w = this.windowsAt(i, errMs < 0 ? -1 : 1);
+    return a <= w.perfect ? 0 : a <= w.great ? 1 : a <= w.good ? 2 : MISS;
   }
 
   /**
@@ -83,11 +85,11 @@ export class Scorer {
       if (i + 1 !== this.first || t - n[i].t < n[this.first].t - t) return null;
       i = this.first;
     }
-    if (this.hybrid && !n[i].primary) {
-      // Prefer the coarser grid: snap to the nearest primary note if it's within its capture range,
-      // so a sloppy 8th isn't mistaken for a well-timed 16th.
-      const p = this.nearestPrimary(i, t);
-      if (p >= this.first && Math.abs(t - n[p].t) <= this.captureAt(p)) i = p;
+    if (this.classify((t - n[i].t) / this.rate, i) === MISS) {
+      // Outside the nearest note's window: the neighbour on the other side may reach further (a
+      // primary note next to a secondary one in a hybrid grid). Windows never overlap.
+      const k = i + (t > n[i].t ? 1 : -1);
+      if (k >= this.first && k < n.length && this.classify((t - n[k].t) / this.rate, k) !== MISS) i = k;
     }
 
     const errSong = t - n[i].t;
@@ -120,26 +122,6 @@ export class Scorer {
     const hit = { t, err, j, i, slot: n[i].slot, sec: n[i].sec, pad, lane };
     this.hits.push(hit);
     return { type: 'hit', hit };
-  }
-
-  nearestPrimary(i, t) {
-    const n = this.notes;
-    let left = -1, right = -1;
-    for (let k = i - 1; k >= 0 && k >= i - 8; k--) if (n[k].primary) { left = k; break; }
-    for (let k = i + 1; k < n.length && k <= i + 8; k++) if (n[k].primary) { right = k; break; }
-    if (left < 0) return right;
-    if (right < 0) return left;
-    return t - n[left].t <= n[right].t - t ? left : right;
-  }
-
-  /** How far (song ms) from primary note p a stroke is still snapped to it in a hybrid grid. */
-  captureAt(p) {
-    const n = this.notes;
-    let gap = Infinity;
-    if (p > 0) gap = Math.min(gap, n[p].t - n[p - 1].t);
-    if (p + 1 < n.length) gap = Math.min(gap, n[p + 1].t - n[p].t);
-    // the good window, but always leave the secondary note a fair share of the space
-    return Math.min(this.windows.good * this.rate, 0.65 * gap);
   }
 
   stats() {

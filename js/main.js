@@ -880,6 +880,7 @@ async function setupPlain(target) {
   if (prefs.tempoDetect?.v !== TEMPO_VERSION) {
     const r = await detectTempo(target.buffer);
     prefs.tempoDetect = { v: TEMPO_VERSION, clear: r.clear, candidates: r.candidates.map(c => ({ period: c.period, phase: c.phase, beats: c.beats })) };
+    if (prefs.tempo) Object.assign(prefs.tempo, { cand: 0, mult: 1, half: false, bar: 0 }); // a new detection may list other options
   }
   prefs.tempo ||= { cand: 0, mult: 1, half: false, meter: 4, bar: 0 };
   applyTempo(target, prefs);

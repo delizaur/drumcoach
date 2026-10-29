@@ -1,7 +1,8 @@
 // Tempo detection for songs without an osu! map: finds a steady beat grid in the audio.
 //
-// 1. Coarse tempo candidates: peaks of the onset curve's autocorrelation, scored over the first
-//    four multiples of each lag, with a mild preference for tempos near 130 BPM.
+// 1. Coarse tempo candidates: peaks of the onset curve's autocorrelation (averaged over 20 s
+//    windows), scored over the first four multiples of each lag, with a mild preference for
+//    tempos near 130 BPM.
 // 2. For each candidate, a fine search of period and phase on a smoothed onset curve.
 // 3. A robust straight-line fit through the clear onsets nearest to each predicted beat.
 // 4. A final fine-tune that maximises the grid's fit to the onsets on a sharper curve.
@@ -13,7 +14,7 @@
 // three candidates (allowing a half-beat shift) for 97 of them, typically within 1 ms.
 import { drumOnsets } from './beatsync.js';
 
-export const TEMPO_VERSION = 2;
+export const TEMPO_VERSION = 3;
 
 function smooth(x, sigma) {
   const r = Math.ceil(sigma * 3), k = [];
@@ -47,21 +48,34 @@ function linfit(pts) {
 
 const median = v => { const s = [...v].sort((a, b) => a - b); return s[s.length >> 1] || 0; };
 
+const ACF_WINDOW = 20000; // ms
+
 function coarseCandidates(env, from, to, count) {
   const D = 4, i0 = Math.floor(from / D), n = Math.floor(to / D) - i0;
   const e = new Float32Array(n);
   for (let i = 0; i < n; i++) { let s = 0; for (let j = 0; j < D; j++) s += env[(i0 + i) * D + j]; e[i] = s; }
-  let mean = 0;
-  for (const v of e) mean += v;
-  mean /= n;
-  for (let i = 0; i < n; i++) e[i] -= mean;
+  // autocorrelation in overlapping windows, each normalised by its own energy, so every part of
+  // the song counts the same: a short section with very sharp hits (a click-like outro) would
+  // otherwise outweigh the rest of the song
+  const W = Math.min(n, ACF_WINDOW / D), wins = [];
+  for (let a = 0; a + W <= n; a += W / 2) {
+    let mean = 0, energy = 0;
+    for (let i = a; i < a + W; i++) mean += e[i];
+    mean /= W;
+    for (let i = a; i < a + W; i++) energy += (e[i] - mean) ** 2;
+    if (energy > 0) wins.push({ a, mean, energy });
+  }
   const cache = new Map();
   const acf = lag => {
     if (cache.has(lag)) return cache.get(lag);
-    let s = 0;
-    for (let i = lag; i < n; i++) s += e[i] * e[i - lag];
-    cache.set(lag, s);
-    return s;
+    let total = 0;
+    for (const { a, mean, energy } of wins) {
+      let s = 0;
+      for (let i = a + lag; i < a + W; i++) s += (e[i] - mean) * (e[i - lag] - mean);
+      total += s / energy;
+    }
+    cache.set(lag, total);
+    return total;
   };
   const lo = Math.floor(240 / D), hi = Math.ceil(1000 / D), score = {}; // 60–250 BPM
   for (let lag = lo; lag <= hi; lag++) {
@@ -217,6 +231,11 @@ export async function detectTempo(buffer, count = 3) {
   if (to - from < 10000) return { candidates: [], clear: false };
   const soft = smooth(env, 4), sharp = smooth(env, 1.5);
   const candidates = coarseCandidates(env, from, to, count).map(P0 => refine(env, soft, sharp, P0, from, to));
+  // the grid that sits best on the onsets first; a slower grid only lands on the strongest hits, so
+  // it tends to fit better: when the best one has a double-tempo partner, the partner goes first
+  candidates.sort((a, b) => b.fit - a.fit);
+  const double = candidates.findIndex(c => Math.abs(candidates[0].period / c.period / 2 - 1) < 0.01);
+  if (double > 0) candidates.unshift(...candidates.splice(double, 1));
   for (const c of candidates) c.beats = track(soft, sharp, c.period, c.phase);
   // the curve averages 1, so a grid on the beat of percussive music scores well above that
   return { candidates, clear: (candidates[0]?.fit || 0) >= 1.8 };

@@ -949,6 +949,7 @@ function renderSongInfo() {
   const has = !!song?.diff;
   $('songInfo').hidden = !has;
   $('songSettings').hidden = !has || settings.mode !== 'song';
+  $('tripletRow').hidden = !has || settings.mode !== 'song' || !!song.diff.plain;
   $('dropZone').querySelector('strong').textContent = 'Add songs';
   const bgCss = has && song.bgUrl ? `url("${song.bgUrl}")` : '';
   $('songBg').style.backgroundImage = bgCss;
@@ -971,7 +972,6 @@ function renderSongInfo() {
   }
   renderTempo();
   renderAutoInfo();
-  $('tripletRow').hidden = !!d.plain;
   const fills = mergeBeats(song.triplets || []);
   $('tripletInfo').textContent = d.plain ? '' : fills.length
     ? `${fills.length} triplet section${fills.length > 1 ? 's' : ''} found in this beatmap (${fills.slice(0, 6).map(f => fmtTime(f.start)).join(', ')}${fills.length > 6 ? ', …' : ''}).`

@@ -62,6 +62,18 @@ export class Scorer {
     return { perfect: Math.min(w.perfect, PERFECT_SHARE * good), great: Math.min(w.great, GREAT_SHARE * good), good };
   }
 
+  /** Typical good window (real ms) of the main grid notes (8ths in a hybrid grid) between song times t0 and t1. */
+  typicalGood(t0, t1) {
+    const n = this.notes, goods = [];
+    for (let i = Math.max(this.first, lowerBound(n, t0)); i < n.length && n[i].t <= t1; i++) {
+      if (this.hybrid && !n[i].primary) continue;
+      goods.push(Math.max(this.windowsAt(i, -1).good, this.windowsAt(i, 1).good));
+    }
+    if (!goods.length) return this.windows.good;
+    goods.sort((a, b) => a - b);
+    return goods[goods.length >> 1];
+  }
+
   classify(errMs, i) {
     const a = Math.abs(errMs), w = this.windowsAt(i, errMs < 0 ? -1 : 1);
     return a <= w.perfect ? 0 : a <= w.great ? 1 : a <= w.good ? 2 : MISS;

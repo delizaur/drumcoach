@@ -242,14 +242,7 @@ async function startSession({ preview = false, from = null } = {}) {
       await song.syncReady;
       $('startBtn').textContent = 'Start';
     }
-    const shift = totalSync();
-    sections = songSections(song.diff.timing, endMs, shift);
-    if (settings.useTriplets && song.triplets?.length) {
-      triplets = song.triplets.map(b => ({ start: b.start + shift, end: b.end + shift }));
-    }
-    if (settings.pattern === 'auto' && song.finer && triplets.length) {
-      sextuplets = song.finer.sextuplets.map(b => ({ start: b.start + shift, end: b.end + shift }));
-    }
+    ({ sections, triplets, sextuplets } = songTiming());
     if (!sections.length) return showSongError('This difficulty has no timing points inside the audio.');
     startPos = clamp(from ?? prefs.startAt, 0, Math.max(0, endMs - 3000));
     const sec = sections[sectionAt(sections, startPos)];
@@ -269,9 +262,7 @@ async function startSession({ preview = false, from = null } = {}) {
     }
   }
 
-  // the automatic grid drops the 16ths on fast sections (real tempo, after the playback rate)
-  const patternFor = settings.pattern === 'auto' ? s => 60000 / s.beatLength * rate > AUTO_FAST_BPM ? AUTO_FAST : pattern : null;
-  const grid = buildGrid(sections, pattern, { tripletBeats: triplets, sextupletBeats: sextuplets, patternFor });
+  const grid = makeGrid(sections, pattern, rate, triplets, sextuplets);
   session = {
     preview,
     mode: settings.mode,
@@ -377,22 +368,42 @@ function scatterRange(s) {
 function drawScatter(s, final = false) {
   s.scatterDirty = false;
   s.lastScatter = performance.now();
-  const { x0, x1 } = scatterRange(s);
+  const range = scatterRange(s), x0 = range.x0;
+  const x1 = final && s.mode !== 'song' ? Math.max(x0 + 1000, s.now) : range.x1;
   scatter.draw({
     hits: s.scorer.hits, misses: s.scorer.misses, notes: s.notes, windows: s.windows,
-    x0, x1: final && s.mode !== 'song' ? Math.max(x0 + 1000, s.now) : x1,
+    good: s.scorer.typicalGood(x0, s.mode === 'song' ? x1 : s.now), x0, x1,
     sectionStarts: s.sections.length > 1 ? s.sections.map(x => x.start) : null,
     tripletSections: s.tripletSections,
     timeAxis: s.mode === 'song',
   });
 }
 
+/** Sections, triplet beats and sextuplet beats of the loaded song, shifted by the sync offset. */
+function songTiming() {
+  const shift = totalSync(), moved = beats => beats.map(b => ({ start: b.start + shift, end: b.end + shift }));
+  const sections = songSections(song.diff.timing, song.durationMs, shift);
+  const triplets = settings.useTriplets && song.triplets?.length ? moved(song.triplets) : [];
+  const sextuplets = settings.pattern === 'auto' && song.finer && triplets.length ? moved(song.finer.sextuplets) : [];
+  return { sections, triplets, sextuplets };
+}
+
+function makeGrid(sections, pattern, rate, triplets, sextuplets) {
+  // the automatic grid drops the 16ths on fast sections (real tempo, after the playback rate)
+  const patternFor = settings.pattern === 'auto' ? s => 60000 / s.beatLength * rate > AUTO_FAST_BPM ? AUTO_FAST : pattern : null;
+  return buildGrid(sections, pattern, { tripletBeats: triplets, sextupletBeats: sextuplets, patternFor });
+}
+
 /** Empty chart spanning the loaded song, so the playhead and seeking work before playing. */
 function drawSongChart() {
   if (session || settings.mode !== 'song' || !song?.diff) return;
-  const t = song.diff.timing;
+  const t = song.diff.timing, windows = STRICTNESS[settings.strictness] || STRICTNESS.normal;
+  // scaled like the session's chart will be, from the grid it will use
+  const { sections, triplets, sextuplets } = songTiming();
+  const notes = sections.length ? makeGrid(sections, currentPattern(), settings.rate, triplets, sextuplets).notes : [];
   scatter.draw({
-    hits: [], misses: [], windows: STRICTNESS[settings.strictness] || STRICTNESS.normal,
+    hits: [], misses: [], windows,
+    good: new Scorer(notes, { windows, rate: settings.rate }).typicalGood(0, song.durationMs),
     x0: 0, x1: song.durationMs, timeAxis: true,
     sectionStarts: t.length > 1 ? t.map(r => r.time) : null,
     tripletSections: settings.useTriplets && song.triplets?.length
@@ -1175,7 +1186,7 @@ function syncWhen() {
   document.querySelectorAll('[data-when]').forEach(el => { el.hidden = !settings[el.dataset.when]; });
 }
 
-bind('rate', 'rate', { after: v => { $('rateLabel').textContent = `${v.toFixed(2)}×`; } });
+bind('rate', 'rate', { after: v => { $('rateLabel').textContent = `${v.toFixed(2)}×`; drawSongChart(); } });
 $('rateLabel').textContent = `${settings.rate.toFixed(2)}×`;
 bind('musicVolume', 'musicVolume', { after: v => audio.setMusicVolume(v) });
 bind('clickVolume', 'clickVolume', { after: v => audio.setClickVolume(v) });
@@ -1237,6 +1248,7 @@ function renderPattern() {
     }
     el.append(beat);
   }
+  drawSongChart();
 }
 
 function renderStrictness() {
@@ -1245,7 +1257,7 @@ function renderStrictness() {
   $('windowsHint').textContent = `Perfect ±${w.perfect} · Great ±${w.great} · Good ±${w.good} ms. On dense or fast grids the windows shrink to fit the spacing, so the middle 20% between two grid notes is always a miss.`;
 }
 document.querySelectorAll('#strictness button').forEach(b => {
-  b.onclick = () => { settings.strictness = b.dataset.value; save(); renderStrictness(); };
+  b.onclick = () => { settings.strictness = b.dataset.value; save(); renderStrictness(); drawSongChart(); };
 });
 
 // ================================================================ settings dialog

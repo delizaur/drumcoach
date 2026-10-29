@@ -304,13 +304,15 @@ export class Scatter extends CanvasView {
   /** Song time at pixel x in the last drawn chart (clamped to the plot). */
   timeAt(x) { const m = this.map; return m ? m.x0 + Math.min(1, Math.max(0, (x - m.padL) / m.pw)) * m.span : 0; }
 
-  /** @param {{hits, misses, x0, x1, windows, sectionStarts?: number[], tripletSections?: {start, end}[], timeAxis?: boolean}} s */
+  /** @param {{hits, misses, x0, x1, windows, good?: number, sectionStarts?: number[], tripletSections?: {start, end}[], timeAxis?: boolean}} s */
   draw(s) {
     this.last = s;
     const { g, w, h } = this, c = colors();
     g.clearRect(0, 0, w, h);
     const padL = 40, padR = 8, padT = 8, padB = 18;
-    const range = Math.ceil((s.windows.good * 1.6) / 10) * 10;
+    // scaled to the typical good window in use (it shrinks with the grid spacing), with room for the
+    // misses around it: they lie within half the spacing, ~1.25× the good window of the main notes
+    const range = Math.ceil(((s.good ?? s.windows.good) * 1.3) / 10) * 10;
     const pw = w - padL - padR, ph = h - padT - padB;
     const span = Math.max(1, s.x1 - s.x0);
     this.map = { x0: s.x0, span, padL, pw };

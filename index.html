@@ -213,7 +213,16 @@
       </div>
 
       <div class="panel chart">
-        <div class="chart-head"><span>Timing over time</span><small id="chartHint">each dot is a hit, the line is the moving average</small></div>
+        <div class="chart-head">
+          <span>Timing over time</span>
+          <div class="counts" id="counts">
+            <span class="count perfect"><b>0</b> perfect</span>
+            <span class="count great"><b>0</b> great</span>
+            <span class="count good"><b>0</b> good</span>
+            <span class="count miss" title="Strokes too far from any grid note"><b>0</b> miss</span>
+          </div>
+          <small id="chartHint">each dot is a hit, the line is the moving average</small>
+        </div>
         <div class="chart-plot" id="chartPlot">
           <canvas id="scatter"></canvas>
           <div class="playhead" id="playhead" hidden></div>
@@ -252,14 +261,6 @@
         <div class="tile"><div class="tile-label">Average offset</div><div class="tile-value" id="tMean">—</div><div class="tile-sub" id="tMeanSub">&nbsp;</div></div>
         <div class="tile"><div class="tile-label">Consistency <span class="nocase">(σ)</span></div><div class="tile-value" id="tSd">—</div><div class="tile-sub" id="tSdSub">&nbsp;</div></div>
         <div class="tile"><div class="tile-label">Streak</div><div class="tile-value" id="tStreak">0</div><div class="tile-sub" id="tStreakSub">best 0</div></div>
-      </div>
-
-      <div class="counts" id="counts">
-        <span class="count perfect"><b>0</b> perfect</span>
-        <span class="count great"><b>0</b> great</span>
-        <span class="count good"><b>0</b> good</span>
-        <span class="count miss" title="Strokes too far from any grid note"><b>0</b> miss</span>
-        <span class="count extra" title="A second stroke on a grid note that was already played"><b>0</b> doubled</span>
       </div>
 
     </section>

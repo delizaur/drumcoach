@@ -515,7 +515,7 @@ function updateLive(s) {
 
 function renderCounts(st) {
   const els = $('counts').querySelectorAll('b');
-  [...st.counts, st.extra].forEach((v, k) => { els[k].textContent = v; });
+  st.counts.forEach((v, k) => { els[k].textContent = v; });
 }
 
 function resetLive() {
@@ -523,7 +523,7 @@ function resetLive() {
   for (const id of ['tAccSub', 'tMeanSub', 'tSdSub']) $(id).textContent = ' ';
   $('tStreak').textContent = '0';
   $('tStreakSub').textContent = 'best 0';
-  renderCounts({ counts: [0, 0, 0, 0], extra: 0 });
+  renderCounts({ counts: [0, 0, 0, 0] });
 }
 
 const JUDGE_COLOR = ['var(--perfect)', 'var(--great)', 'var(--good)', 'var(--miss)'];

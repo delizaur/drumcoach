@@ -257,17 +257,24 @@ input[type=range] { width: 100%; accent-color: var(--accent); margin: 6px 0 2px;
 .tile-value small { font-size: 15px; font-weight: 500; color: var(--muted); margin-left: 2px; }
 .tile-sub { font-size: 12.5px; color: var(--muted); white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
 
-.counts { display: flex; flex-wrap: wrap; gap: 8px; }
-.count { font-size: 13px; color: var(--muted); background: var(--panel); border: 1px solid var(--border); border-radius: 999px; padding: 4px 12px 4px 10px; display: inline-flex; align-items: center; gap: 6px; }
+.counts { display: flex; flex-wrap: wrap; justify-content: center; gap: 6px; }
+.count { font-size: 12px; color: var(--muted); background: var(--panel); border: 1px solid var(--border); border-radius: 999px; padding: 2px 10px 2px 8px; display: inline-flex; align-items: center; gap: 6px; }
 .count::before { content: ""; width: 8px; height: 8px; border-radius: 50%; background: currentColor; }
 .count b { color: var(--text); font-variant-numeric: tabular-nums; }
 .count.perfect { color: var(--perfect); } .count.great { color: var(--great); } .count.good { color: var(--good); }
-.count.miss { color: var(--miss); } .count.extra { color: var(--extra); }
+.count.miss { color: var(--miss); }
 .count > :not(b) { color: var(--muted); }
 
 .chart { padding: 12px 16px 14px; }
-.chart-head { display: flex; justify-content: space-between; align-items: baseline; gap: 10px; font-size: 13px; color: var(--muted); margin-bottom: 6px; flex-wrap: wrap; }
-.chart-head span { color: var(--text); font-weight: 600; }
+.chart-head { display: grid; grid-template-columns: 1fr auto 1fr; align-items: center; gap: 10px; font-size: 13px; color: var(--muted); margin-bottom: 6px; }
+.chart-head > span { color: var(--text); font-weight: 600; }
+.chart-head > small { justify-self: end; text-align: right; }
+@media (max-width: 760px) {
+  .chart-head { grid-template-columns: auto 1fr; grid-template-areas: "title hint" "counts counts"; }
+  .chart-head > span { grid-area: title; }
+  .chart-head > small { grid-area: hint; }
+  .chart-head .counts { grid-area: counts; }
+}
 #scatter { width: 100%; height: 160px; display: block; }
 .chart-plot { position: relative; }
 .chart-plot.seekable { cursor: pointer; }

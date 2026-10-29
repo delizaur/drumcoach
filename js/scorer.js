@@ -11,20 +11,20 @@ import { lowerBound, meanSd } from './util.js';
 
 /** Judgment windows (± real ms). A stroke further than `good` from the nearest grid note is a miss. */
 export const STRICTNESS = {
-  relaxed: { perfect: 30, great: 55, good: 90 },
-  normal: { perfect: 18, great: 35, good: 60 },
-  strict: { perfect: 10, great: 22, good: 40 },
+  relaxed: { perfect: 30, great: 55, good: 100 },
+  normal: { perfect: 18, great: 35, good: 70 },
+  strict: { perfect: 10, great: 22, good: 50 },
 };
 export const JUDGMENTS = ['perfect', 'great', 'good', 'miss'];
 export const MISS = 3;
 const WEIGHT = [1, 0.75, 0.45, 0];
 
 // Windows scale with the grid spacing. Between two neighbouring grid notes, the windows cover at most
-// COVERED of the space, so the middle (30% of the gap, e.g. ±9 ms around the midpoint of two 16ths at
-// 200 BPM) is always a miss, however fast the tempo. In hybrid grids, primary notes (e.g. 8ths) get a
+// COVERED of the space, so the middle (20% of the gap, e.g. ±9 ms around the midpoint of two 16ths at
+// 160 BPM) is always a miss, however fast the tempo. In hybrid grids, primary notes (e.g. 8ths) get a
 // larger share of that space than the secondary ones (16ths), so a sloppy 8th isn't taken for a 16th.
 // When the good window shrinks, great and perfect shrink with it once they'd crowd it.
-const COVERED = 0.7;
+const COVERED = 0.8;
 const PULL_PRIMARY = 3, PULL_SECONDARY = 2;
 const GREAT_SHARE = 0.75, PERFECT_SHARE = 0.5; // of the (shrunk) good window, at most
 const MAX_WINDOW = 150;  // strokes further than this past the first/last grid note are ignored

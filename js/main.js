@@ -3,7 +3,7 @@ import { MidiInput, drumName, padOf, LANES } from './midi.js';
 import { readZip } from './zip.js';
 import { loadBeatmapSet, songKey, tempoSummary } from './osu.js';
 import { analyzeSync, SYNC_VERSION } from './beatsync.js';
-import { detectTempo, TEMPO_VERSION } from './tempo.js';
+import { detectTempo, tempoTiming, TEMPO_VERSION } from './tempo.js';
 import { PATTERNS, makePattern, songSections, metronomeSections, buildGrid, sectionAt, TRIPLET_SLOT, SEXTUPLET_SLOT } from './timing.js';
 import { finerBeats } from './autogrid.js';
 import { tripletBeats, mergeBeats } from './triplets.js';
@@ -879,21 +879,17 @@ async function setupPlain(target) {
   const prefs = (settings.songPrefs[target.key] ||= { offset: 0, diff: 0, startAt: 0 });
   if (prefs.tempoDetect?.v !== TEMPO_VERSION) {
     const r = await detectTempo(target.buffer);
-    prefs.tempoDetect = { v: TEMPO_VERSION, clear: r.clear, candidates: r.candidates.map(c => ({ period: c.period, phase: c.phase })) };
+    prefs.tempoDetect = { v: TEMPO_VERSION, clear: r.clear, candidates: r.candidates.map(c => ({ period: c.period, phase: c.phase, beats: c.beats })) };
   }
   prefs.tempo ||= { cand: 0, mult: 1, half: false, meter: 4, bar: 0 };
   applyTempo(target, prefs);
   save();
 }
 
-/** Turns the chosen candidate plus the player's adjustments into a single timing point. */
+/** Turns the chosen candidate plus the player's adjustments into timing points. */
 function applyTempo(target, prefs) {
-  const t = prefs.tempo, c = prefs.tempoDetect?.candidates[t.cand];
-  if (!c) { target.diff.timing = []; return; }
-  const P = c.period / t.mult, bar = P * t.meter;
-  const downbeat = c.phase + (t.half ? P / 2 : 0) + t.bar * P;
-  // start one bar early so the first bar is complete; beats before 0 ms are never played
-  target.diff.timing = [{ time: (((downbeat % bar) + bar) % bar) - bar, beatLength: P, meter: t.meter }];
+  const c = prefs.tempoDetect?.candidates[prefs.tempo.cand];
+  target.diff.timing = c ? tempoTiming(c, prefs.tempo, target.durationMs) : [];
 }
 
 function changeTempo(fn) {

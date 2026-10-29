@@ -5,12 +5,15 @@
 // 2. For each candidate, a fine search of period and phase on a smoothed onset curve.
 // 3. A robust straight-line fit through the clear onsets nearest to each predicted beat.
 // 4. A final fine-tune that maximises the grid's fit to the onsets on a sharper curve.
+// 5. Beat tracking: live recordings speed up and slow down, so a single tempo drifts off the beat
+//    over the song. The beat's shift from the straight grid is measured in chunks of 16 beats, and
+//    the timing gets an extra red line wherever it moves more than a few ms away.
 //
 // Tested against 99 hand-timed osu! maps with a constant tempo: the right grid was among the
 // three candidates (allowing a half-beat shift) for 97 of them, typically within 1 ms.
 import { drumOnsets } from './beatsync.js';
 
-export const TEMPO_VERSION = 1;
+export const TEMPO_VERSION = 2;
 
 function smooth(x, sigma) {
   const r = Math.ceil(sigma * 3), k = [];
@@ -116,10 +119,97 @@ function refine(env, soft, sharp, P0, from, to) {
   return { period: P, phase, bpm: 60000 / P, fit: best };
 }
 
+const TRACK_STEP = 16;    // beats per chunk; the beat's shift from the straight tempo is measured on each
+const TRACK_RANGE = 100;  // ms the shift may reach (at most a sixth of a beat)
+const TRACK_STIFF = 0.03; // cost of changing the shift between chunks, per ms² (the fit averages 1)
+const TRACK_MIN = 4;      // shifts that all stay within this (ms) keep the straight tempo
+
+/**
+ * Follows a candidate's beat through the song in chunks: times (ms) of beats 0, TRACK_STEP,
+ * 2·TRACK_STEP, … counted from the beat at `phase`, or [] when the straight tempo already fits.
+ * The shifts are the path that best fits the onsets while changing smoothly (dynamic programming),
+ * so a chunk where an off-beat stands out doesn't pull the grid away.
+ */
+function track(soft, sharp, period, phase) {
+  const n = Math.ceil((soft.length - phase) / period / TRACK_STEP) + 1;
+  // mean curve value on the beats of chunk i (centred on beat i·TRACK_STEP), shifted by d ms
+  const fit = (curve, i, d) => {
+    let s = 0;
+    for (let k = i * TRACK_STEP - TRACK_STEP / 2; k < (i + 1) * TRACK_STEP - TRACK_STEP / 2; k++) s += at(curve, phase + k * period + d);
+    return s / TRACK_STEP;
+  };
+  const R = Math.round(Math.min(TRACK_RANGE, period / 6)), S = 2 * R + 1;
+  const score = new Float64Array(S), next = new Float64Array(S), from = [];
+  for (let s = 0; s < S; s++) score[s] = fit(soft, 0, s - R);
+  for (let i = 1; i < n; i++) {
+    const back = new Int16Array(S);
+    for (let s = 0; s < S; s++) {
+      let best = -Infinity;
+      for (let p = 0; p < S; p++) { const v = score[p] - TRACK_STIFF * (s - p) ** 2; if (v > best) { best = v; back[s] = p; } }
+      next[s] = best + fit(soft, i, s - R);
+    }
+    score.set(next);
+    from.push(back);
+  }
+  const shift = new Float64Array(n);
+  let s = score.indexOf(Math.max(...score));
+  for (let i = n - 1; i >= 0; i--) { shift[i] = s - R; if (i) s = from[i - 1][s]; }
+  // finer, on the sharper curve
+  for (let i = 0; i < n; i++) {
+    let best = -1, d = shift[i];
+    for (let x = shift[i] - 1.5; x <= shift[i] + 1.5; x += 0.25) { const v = fit(sharp, i, x); if (v > best) { best = v; d = x; } }
+    if (best > 0) shift[i] = d;
+  }
+  // smoothing: median of 3, then mean of 3
+  const med = shift.map((v, i) => median([shift[Math.max(0, i - 1)], v, shift[Math.min(n - 1, i + 1)]]));
+  const smooth3 = med.map((v, i) => (med[Math.max(0, i - 1)] + v + med[Math.min(n - 1, i + 1)]) / 3);
+  if (smooth3.every(v => Math.abs(v) <= TRACK_MIN)) return [];
+  return [...smooth3].map((d, i) => Math.round((phase + i * TRACK_STEP * period + d) * 10) / 10);
+}
+
+const TIMING_TOLERANCE = 3;
+
+/**
+ * Red lines for a detected candidate, after the player's adjustments: a single tempo, or one more
+ * line wherever the tracked beat moves more than TIMING_TOLERANCE ms from it (on the downbeats).
+ * @param {{period:number, phase:number, beats?:number[]}} c
+ * @param {{mult:number, half:boolean, meter:number, bar:number}} adj
+ */
+export function tempoTiming(c, { mult, half, meter, bar }, durationMs) {
+  const P = c.period / mult, beats = c.beats?.length > 1 ? c.beats : null;
+  // time of the candidate's beat x (fractional; 0 = the beat at phase)
+  const at = x => {
+    if (!beats) return c.phase + x * c.period;
+    const i = Math.max(0, Math.min(beats.length - 2, Math.floor(x / TRACK_STEP)));
+    return beats[i] + (beats[i + 1] - beats[i]) * (x / TRACK_STEP - i);
+  };
+  const x0 = ((half ? 0.5 : 0) + bar) / mult, perBar = meter / mult; // candidate beats
+  // downbeats from the last one before 0 ms (so the first bar is complete) to past the end
+  let n = Math.floor(-x0 / perBar) + 1;
+  while (at(x0 + n * perBar) >= 0) n--;
+  const T = [];
+  for (; T.length < 2 || T.at(-2) < durationMs; n++) T.push(at(x0 + n * perBar));
+  if (!beats) return [{ time: T[0], beatLength: P, meter }];
+  // greedy: each line runs as far as a straight tempo stays within the tolerance of every downbeat
+  const lines = [];
+  for (let i = 0; i < T.length - 1;) {
+    let j = i + 1;
+    for (let k = j + 1; k < T.length; k++) {
+      const ok = T.slice(i + 1, k).every((t, m) => Math.abs(t - (T[i] + (T[k] - T[i]) * (m + 1) / (k - i))) <= TIMING_TOLERANCE);
+      if (!ok) break;
+      j = k;
+    }
+    lines.push({ time: T[i], beatLength: (T[j] - T[i]) / ((j - i) * meter), meter });
+    i = j;
+  }
+  return lines;
+}
+
 /**
  * @param {AudioBuffer} buffer
- * @returns {Promise<{candidates: {bpm:number, period:number, phase:number, fit:number}[], clear:boolean}>}
- *   candidates in order of preference; phase = time (ms) of a beat in [0, period)
+ * @returns {Promise<{candidates: {bpm:number, period:number, phase:number, fit:number, beats:number[]}[], clear:boolean}>}
+ *   candidates in order of preference; phase = time (ms) of a beat in [0, period); beats = tracked
+ *   times of every TRACK_STEP-th beat from there (see tempoTiming)
  */
 export async function detectTempo(buffer, count = 3) {
   const env = await drumOnsets(buffer);
@@ -127,6 +217,7 @@ export async function detectTempo(buffer, count = 3) {
   if (to - from < 10000) return { candidates: [], clear: false };
   const soft = smooth(env, 4), sharp = smooth(env, 1.5);
   const candidates = coarseCandidates(env, from, to, count).map(P0 => refine(env, soft, sharp, P0, from, to));
+  for (const c of candidates) c.beats = track(soft, sharp, c.period, c.phase);
   // the curve averages 1, so a grid on the beat of percussive music scores well above that
   return { candidates, clear: (candidates[0]?.fit || 0) >= 1.8 };
 }

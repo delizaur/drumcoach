@@ -1,7 +1,9 @@
 import { AudioEngine } from './audio.js';
 import { MidiInput, drumName, padOf, LANES } from './midi.js';
 import { readZip } from './zip.js';
+import { readSng } from './sng.js';
 import { loadBeatmapSet, songKey, tempoSummary } from './osu.js';
+import { loadChartSet, isChartFile } from './clonehero.js';
 import { analyzeSync, SYNC_VERSION } from './beatsync.js';
 import { detectTempo, tempoTiming, TEMPO_VERSION } from './tempo.js';
 import { PATTERNS, makePattern, songSections, metronomeSections, buildGrid, sectionAt, TRIPLET_SLOT, SEXTUPLET_SLOT } from './timing.js';
@@ -32,7 +34,7 @@ const DEFAULTS = {
   pattern: 'auto', customSubdiv: 4, customGrid: 'x..x..x.',
   clickMode: 'beats', clickVolume: 0.7, strictness: 'normal',
   // song
-  rate: 1, musicVolume: 0.85, songClick: false, lastSong: null, songPrefs: {},
+  rate: 1, musicVolume: 0.85, songClick: false, drumStem: true, lastSong: null, songPrefs: {},
   autoSync: true, syncFineTune: 0, syncMigrated: false, useTriplets: true,
   openGroups: { playalongGroup: true, libraryBox: true }, // collapsible panel sections
   timelineZoom: 1, showWindows: false, // scrolling grid view
@@ -60,7 +62,9 @@ if (!settings.syncMigrated) {
 }
 
 // Used when a song's beat can't be detected: the typical offset measured across osu! maps.
+// Clone Hero charts are synced to the audio by their charters, so they get none.
 const FALLBACK_SYNC = 22;
+const fallbackSync = () => (song?.diff?.format === 'ch' ? 0 : FALLBACK_SYNC);
 
 function songPrefs() {
   if (!song) return { offset: 0, diff: 0, startAt: 0 };
@@ -70,7 +74,7 @@ function songPrefs() {
 // ================================================================ state
 
 const audio = new AudioEngine(settings.audioBuffer);
-let song = null;      // { key, diffs, diff, diffIndex, buffer, audioName, durationMs, bgName, bgUrl }
+let song = null;      // { key, diffs, diff, diffIndex, buffer, backing, stems, audioName, durationMs, bgName, bgUrl }
 let session = null;
 let calib = null;
 let schedulerTimer = 0;
@@ -235,7 +239,7 @@ async function startSession({ preview = false, from = null } = {}) {
   if (settings.mode === 'song') {
     const prefs = songPrefs();
     rate = settings.rate;
-    buffer = song.buffer;
+    buffer = musicBuffer();
     endMs = song.durationMs;
     if (settings.autoSync && !song.sync) {
       $('startBtn').textContent = 'Analyzing…';
@@ -373,10 +377,21 @@ function drawScatter(s, final = false) {
   scatter.draw({
     hits: s.scorer.hits, misses: s.scorer.misses, notes: s.notes, windows: s.windows,
     good: s.scorer.typicalGood(x0, s.mode === 'song' ? x1 : s.now), x0, x1,
-    sectionStarts: s.sections.length > 1 ? s.sections.map(x => x.start) : null,
+    sectionStarts: tempoChanges(s.sections),
     tripletSections: s.tripletSections,
     timeAxis: s.mode === 'song',
   });
+}
+
+/**
+ * Where the tempo changes by 0.5% or more, for the timing chart. Tempo maps of live recordings
+ * (and many Clone Hero charts) nudge the tempo every bar or beat, which would bury the real changes;
+ * if they still come more often than every 8 seconds on average, none are marked.
+ */
+function tempoChanges(sections) {
+  const out = sections.filter((x, i) => i > 0 && Math.abs(x.beatLength / sections[i - 1].beatLength - 1) >= 0.005).map(x => x.start);
+  const span = sections.length ? sections.at(-1).end - sections[0].start : 0;
+  return out.length && out.length <= span / 8000 ? out : null;
 }
 
 /** Sections, triplet beats and sextuplet beats of the loaded song, shifted by the sync offset. */
@@ -397,7 +412,7 @@ function makeGrid(sections, pattern, rate, triplets, sextuplets) {
 /** Empty chart spanning the loaded song, so the playhead and seeking work before playing. */
 function drawSongChart() {
   if (session || settings.mode !== 'song' || !song?.diff) return;
-  const t = song.diff.timing, windows = STRICTNESS[settings.strictness] || STRICTNESS.normal;
+  const windows = STRICTNESS[settings.strictness] || STRICTNESS.normal;
   // scaled like the session's chart will be, from the grid it will use
   const { sections, triplets, sextuplets } = songTiming();
   const notes = sections.length ? makeGrid(sections, currentPattern(), settings.rate, triplets, sextuplets).notes : [];
@@ -405,7 +420,7 @@ function drawSongChart() {
     hits: [], misses: [], windows,
     good: new Scorer(notes, { windows, rate: settings.rate }).typicalGood(0, song.durationMs),
     x0: 0, x1: song.durationMs, timeAxis: true,
-    sectionStarts: t.length > 1 ? t.map(r => r.time) : null,
+    sectionStarts: tempoChanges(sections),
     tripletSections: settings.useTriplets && song.triplets?.length
       ? mergeBeats(song.triplets).map(f => ({ start: f.start + totalSync(), end: f.end + totalSync() })) : null,
   });
@@ -662,7 +677,7 @@ function showResults(s) {
   new Scatter($('resScatter')).draw({
     hits: s.scorer.hits, misses: s.scorer.misses, notes: s.notes, windows: s.windows,
     x0, x1: s.mode === 'song' ? s.endMs : Math.max(x0 + 1000, s.now),
-    sectionStarts: s.sections.length > 1 ? s.sections.map(x => x.start) : null,
+    sectionStarts: tempoChanges(s.sections),
     tripletSections: s.tripletSections,
     timeAxis: s.mode === 'song',
   });
@@ -682,12 +697,13 @@ function showSongError(msg) {
 // A song's source files are { file, path } items; `path` is relative to the beatmap folder.
 // (Library records saved by older versions hold plain File objects.)
 const asItems = list => [...list].map(x => (x instanceof Blob ? { file: x, path: x.name } : x));
-const isArchive = path => /\.(osz|zip)$/i.test(path);
+const isArchive = path => /\.(osz|zip|sng)$/i.test(path);
 
 async function filesToEntries(items) {
   const entries = [];
   for (const { file, path } of items) {
-    if (isArchive(path)) entries.push(...await readZip(file));
+    if (/\.sng$/i.test(path)) entries.push(...await readSng(file));
+    else if (isArchive(path)) entries.push(...await readZip(file));
     else entries.push({ name: path, size: file.size, bytes: async () => new Uint8Array(await file.arrayBuffer()) });
   }
   return entries;
@@ -709,10 +725,18 @@ function plainDiff(entry) {
 
 async function readSongSet(items) {
   const entries = await filesToEntries(items);
+  const whole = items.length === 1 && isArchive(items[0].path);
+  if (!entries.some(e => /\.osu$/i.test(e.name)) && entries.some(e => isChartFile(e.name))) {
+    const diffs = await loadChartSet(entries);
+    const d = diffs[0], used = new Set([...d.stems.map(x => x.entry.name), d.bgEntry?.name]);
+    // the charts and the ini, plus the audio and image in use (not videos or ignored stems)
+    const keep = whole ? items : items.filter(it => used.has(it.path) || isChartFile(it.path) || /(^|\/)song\.ini$/i.test(it.path));
+    return { diffs, keep };
+  }
   if (!entries.some(e => /\.osu$/i.test(e.name))) {
     const audioEntry = entries.find(e => AUDIO_RE.test(e.name));
     if (audioEntry) {
-      const keep = items.length === 1 && isArchive(items[0].path) ? items : items.filter(it => it.path === audioEntry.name);
+      const keep = whole ? items : items.filter(it => it.path === audioEntry.name);
       return { diffs: [plainDiff(audioEntry)], keep };
     }
   }
@@ -721,7 +745,7 @@ async function readSongSet(items) {
   for (const d of diffs) d.audioEntry ||= fallbackAudio;
   // Unpacked folders can hold videos, storyboards and hitsounds; only keep what we use.
   const used = new Set(diffs.flatMap(d => [d.audioEntry?.name, d.bgEntry?.name]));
-  const keep = items.length === 1 && isArchive(items[0].path)
+  const keep = whole
     ? items
     : items.filter(it => /\.osu$/i.test(it.path) || used.has(it.path));
   return { diffs, keep };
@@ -769,9 +793,14 @@ async function loadSong(list, { fromLibrary = false } = {}) {
 
 async function selectDifficulty(target, index) {
   const d = target.diffs[index];
-  if (target.audioName !== d.audioEntry.name) {
-    target.buffer = await audio.decode(await d.audioEntry.bytes());
-    target.audioName = d.audioEntry.name;
+  const stems = d.stems || [{ entry: d.audioEntry, drums: false }];
+  const audioName = stems.map(x => x.entry.name).join('|');
+  if (target.audioName !== audioName) {
+    target.stems = [];
+    for (const x of stems) target.stems.push({ buffer: await audio.decode(await x.entry.bytes()), drums: x.drums });
+    target.buffer = mixStems(target.stems);
+    target.backing = null; // mixed when first needed
+    target.audioName = audioName;
     target.durationMs = target.buffer.duration * 1000;
   }
   const bgName = d.bgEntry?.name || null;
@@ -784,17 +813,42 @@ async function selectDifficulty(target, index) {
   target.diffIndex = index;
 }
 
+/** Sums decoded stems into one buffer (they all come decoded at the context's sample rate). */
+function mixStems(stems) {
+  if (stems.length === 1) return stems[0].buffer;
+  const length = Math.max(...stems.map(x => x.buffer.length));
+  const numberOfChannels = Math.max(...stems.map(x => x.buffer.numberOfChannels));
+  const out = new AudioBuffer({ length, numberOfChannels, sampleRate: stems[0].buffer.sampleRate });
+  for (let c = 0; c < numberOfChannels; c++) {
+    const dst = out.getChannelData(c);
+    for (const { buffer: b } of stems) {
+      const src = b.getChannelData(Math.min(c, b.numberOfChannels - 1));
+      for (let i = 0; i < src.length; i++) dst[i] += src[i];
+    }
+  }
+  return out;
+}
+
+const hasDrumStem = () => !!song?.stems?.some(x => x.drums) && song.stems.some(x => !x.drums);
+
+/** The music to play: the full mix, or the stems without the drums if they're switched off. */
+function musicBuffer() {
+  if (settings.drumStem || !hasDrumStem()) return song.buffer;
+  return (song.backing ||= mixStems(song.stems.filter(x => !x.drums)));
+}
+
 const dirOf = path => (path.includes('/') ? path.slice(0, path.lastIndexOf('/')) : '');
 
 /**
  * Splits dropped/selected items into songs: each archive is one song, and so is each folder
- * containing .osu files (with everything below it). Loose top-level files form one song.
+ * containing .osu files or a Clone Hero chart (with everything below it). Loose top-level files
+ * form one song.
  */
 function groupItems(items) {
   items = items.filter(it => !basename(it.path).startsWith('.'));
   const archives = items.filter(it => isArchive(it.path));
   const rest = items.filter(it => !isArchive(it.path));
-  const roots = [...new Set(rest.filter(it => /\.osu$/i.test(it.path)).map(it => dirOf(it.path)))]
+  const roots = [...new Set(rest.filter(it => /\.osu$/i.test(it.path) || isChartFile(it.path)).map(it => dirOf(it.path)))]
     .sort((a, b) => b.length - a.length); // deepest first, so nested beatmap folders win
   // audio files outside any beatmap folder become songs of their own (tempo is detected)
   const loneAudio = rest.filter(it => AUDIO_RE.test(it.path) && !roots.some(r => r === '' || it.path.startsWith(r + '/')))
@@ -910,7 +964,7 @@ function changeTempo(fn) {
 /** The automatic part of the sync: detected, typical fallback, or nothing when auto-sync is off. */
 function autoSync() {
   if (!settings.autoSync || !song?.sync) return 0;
-  return song.sync.ok ? song.sync.offset : FALLBACK_SYNC;
+  return song.sync.ok ? song.sync.offset : fallbackSync();
 }
 
 /** Total shift (ms) applied to the map's beats; positive moves them later. */
@@ -959,7 +1013,9 @@ function renderSongInfo() {
   const d = song.diff, prefs = songPrefs();
   const bpm = v => +v.toFixed(1);
   $('songTitle').textContent = d.title;
-  $('songArtist').textContent = d.plain ? (d.artist || 'Audio file · tempo detected') : d.artist + (d.creator ? ` · mapped by ${d.creator}` : '');
+  const by = d.format === 'ch' ? 'charted' : 'mapped';
+  $('songArtist').textContent = d.plain ? (d.artist || 'Audio file · tempo detected') : d.artist + (d.creator ? ` · ${by} by ${d.creator}` : '');
+  $('drumStemRow').hidden = !hasDrumStem();
   if (d.timing.length) {
     const t = tempoSummary(d.timing, song.durationMs);
     $('songMeta').textContent = [
@@ -973,9 +1029,11 @@ function renderSongInfo() {
   renderTempo();
   renderAutoInfo();
   const fills = mergeBeats(song.triplets || []);
+  const source = d.format === 'ch' ? 'chart' : 'beatmap';
+  $('tripletSource').textContent = source;
   $('tripletInfo').textContent = d.plain ? '' : fills.length
-    ? `${fills.length} triplet section${fills.length > 1 ? 's' : ''} found in this beatmap (${fills.slice(0, 6).map(f => fmtTime(f.start)).join(', ')}${fills.length > 6 ? ', …' : ''}).`
-    : 'No triplet sections found in this beatmap.';
+    ? `${fills.length} triplet section${fills.length > 1 ? 's' : ''} found in this ${source} (${fills.slice(0, 6).map(f => fmtTime(f.start)).join(', ')}${fills.length > 6 ? ', …' : ''}).`
+    : `No triplet sections found in this ${source}.`;
   renderSync();
 
   const sel = $('diffSelect');
@@ -1014,7 +1072,7 @@ function renderSync() {
   if (song?.diff?.plain) {
     main = 'Beat grid detected from the audio. Check it with the preview.';
   } else if (!settings.autoSync) {
-    main = 'Auto-sync is off, so the map\'s own timing is used.';
+    main = `Auto-sync is off, so the ${song?.diff?.format === 'ch' ? 'chart' : 'map'}'s own timing is used.`;
   } else if (!sync) {
     main = 'Analyzing the beat…';
     cls = 'pending';
@@ -1022,7 +1080,9 @@ function renderSync() {
     const quality = sync.confidence >= 3 ? 'clear match' : 'fair match';
     main = `Auto-sync <b>${fmtMs(sync.offset, 1)}</b> <span class="hint">(${quality} with the drums)</span>`;
   } else {
-    main = `Couldn't detect the beat clearly, so the typical <b>${fmtMs(FALLBACK_SYNC)}</b> is used. Adjust by ear if needed.`;
+    main = song.diff.format === 'ch'
+      ? 'Couldn\'t detect the beat clearly, so the chart\'s own timing is used. Adjust by ear if needed.'
+      : `Couldn't detect the beat clearly, so the typical <b>${fmtMs(FALLBACK_SYNC)}</b> is used. Adjust by ear if needed.`;
     cls = 'warn';
   }
   const flags = (settings.autoSync && sync?.ok ? sync.flagged : []).map(f => {
@@ -1188,6 +1248,7 @@ $('rateLabel').textContent = `${settings.rate.toFixed(2)}×`;
 bind('musicVolume', 'musicVolume', { after: v => audio.setMusicVolume(v) });
 bind('clickVolume', 'clickVolume', { after: v => audio.setClickVolume(v) });
 bind('songClick', 'songClick', { event: 'change', after: syncClickControls });
+bind('drumStem', 'drumStem', { event: 'change' });
 bind('useTriplets', 'useTriplets', { event: 'change', after: () => { renderAutoInfo(); drawSongChart(); } });
 /** Click type and volume only matter in song mode when the click track is on. */
 // Collapsible sections remember whether they were open.
@@ -1214,7 +1275,7 @@ function renderAutoInfo() {
   el.hidden = settings.pattern !== 'auto';
   if (el.hidden) return;
   if (settings.mode !== 'song' || !song?.diff || song.diff.plain) {
-    el.textContent = `Without a beatmap this works like "8ths, 16ths allowed", with only 8ths above ${AUTO_FAST_BPM} BPM.`;
+    el.textContent = `Without a beatmap or chart this works like "8ths, 16ths allowed", with only 8ths above ${AUTO_FAST_BPM} BPM.`;
     return;
   }
   const parts = [];
@@ -1222,9 +1283,10 @@ function renderAutoInfo() {
   if (fills && settings.useTriplets) parts.push(`triplets in ${fills} section${fills > 1 ? 's' : ''}`);
   const sext = settings.useTriplets ? song.finer?.sextuplets.length || 0 : 0;
   if (sext) parts.push(`sextuplets in ${sext} beat${sext > 1 ? 's' : ''}`);
+  const source = song.diff.format === 'ch' ? 'chart' : 'beatmap';
   el.textContent = `8ths and 16ths (only 8ths above ${AUTO_FAST_BPM} BPM)` + (parts.length
-    ? `, plus from this beatmap: ${parts.join(', ')}.`
-    : '. This beatmap needs nothing else.');
+    ? `, plus from this ${source}: ${parts.join(', ')}.`
+    : `. This ${source} needs nothing else.`);
 }
 
 function renderPattern() {

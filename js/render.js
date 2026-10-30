@@ -122,17 +122,28 @@ export class Timeline extends CanvasView {
       }
     }
 
-    // tempo labels at section starts
+    // tempo labels at section starts; with tempo changes every few beats they would overlap, so a
+    // label that would run into the previous one is left out
     g.font = '600 12px system-ui';
+    g.fillStyle = c.accent;
+    const labels = [];
     for (let i = 0; i < s.sections.length; i++) {
       const sec = s.sections[i];
       if (sec.start < t0 - 4000 || sec.start > t1) continue;
       const prev = s.sections[i - 1];
       const bpm = (60000 / sec.beatLength) * s.rate;
-      if (prev && Math.abs(prev.beatLength - sec.beatLength) < 0.01 && prev.meter === sec.meter) continue;
-      const x = Math.max(70, toX(sec.start) + 4);
-      g.fillStyle = c.accent;
-      g.fillText(`${+bpm.toFixed(1)} BPM${sec.meter !== 4 ? ` · ${sec.meter}/4` : ''}`, x, 13);
+      const sig = sec.sig || `${sec.meter}/4`;
+      if (prev && Math.abs(prev.beatLength - sec.beatLength) < 0.01 && (prev.sig || `${prev.meter}/4`) === sig) continue;
+      labels.push({ x: toX(sec.start) + 4, text: `${+bpm.toFixed(1)} BPM${sig !== '4/4' ? ` · ${sig}` : ''}` });
+    }
+    // of the sections that began off-screen, only the latest is labelled (at the left edge)
+    const firstOn = labels.findIndex(l => l.x >= 70);
+    let labelEnd = -Infinity;
+    for (const l of firstOn < 0 ? labels.slice(-1) : labels.slice(Math.max(0, firstOn - 1))) {
+      const x = Math.max(70, l.x);
+      if (x < labelEnd + 10) continue;
+      g.fillText(l.text, x, 13);
+      labelEnd = x + g.measureText(l.text).width;
     }
 
     const sc = s.scorer;

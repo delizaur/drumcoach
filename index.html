@@ -4,7 +4,7 @@
   <meta charset="utf-8">
   <meta name="viewport" content="width=device-width, initial-scale=1">
   <title>DrumCoach — timing trainer</title>
-  <meta name="description" content="Train your drum timing with an electronic kit over USB MIDI. Practice to a metronome or to osu! beatmaps.">
+  <meta name="description" content="Train your drum timing with an electronic kit over USB MIDI. Practice to a metronome, osu! beatmaps, Clone Hero charts or any audio file.">
   <link rel="icon" href="data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 32 32'%3E%3Cellipse cx='16' cy='12' rx='12' ry='5' fill='%238f7dff'/%3E%3Cpath d='M4 12v9c0 2.8 5.4 5 12 5s12-2.2 12-5v-9' fill='none' stroke='%238f7dff' stroke-width='2.5'/%3E%3C/svg%3E">
   <link rel="stylesheet" href="css/style.css">
   <script type="module" src="js/main.js"></script>
@@ -81,7 +81,7 @@
             <svg viewBox="0 0 24 24" aria-hidden="true"><path d="M12 5v14M5 12h14"/></svg>
             <strong>Add songs</strong>
           </button>
-          <input type="file" id="fileInput" multiple hidden accept=".osz,.osu,.zip,.mp3,.ogg,.wav,.m4a,.flac,audio/*">
+          <input type="file" id="fileInput" multiple hidden accept=".osz,.osu,.zip,.sng,.chart,.mid,.ini,.opus,.mp3,.ogg,.wav,.m4a,.flac,audio/*">
           <input type="file" id="folderInput" webkitdirectory hidden>
         </div>
         <p id="songError" class="error" hidden></p>
@@ -140,6 +140,7 @@
               <label for="musicVolume">Music volume</label>
               <input id="musicVolume" type="range" min="0" max="1" step="0.01">
             </div>
+            <label class="switch" id="drumStemRow" hidden><input type="checkbox" id="drumStem"><span class="track"></span>Drums in the music <span class="info" tabindex="0" role="button" aria-label="More info">i<span class="tip" role="tooltip">This chart comes with the drums as a separate audio track. Turn this off to play along without the original drummer.</span></span></label>
             <label class="switch"><input type="checkbox" id="songClick"><span class="track"></span>Click track over the song</label>
         </div>
         <section class="pane">
@@ -160,11 +161,11 @@
         <!-- the grid and how it is judged; the click settings above stay with their toggle -->
         <div class="grid-settings">
           <div id="tripletRow">
-            <label class="switch"><input type="checkbox" id="useTriplets"><span class="track"></span>Triplet fills from the beatmap <span class="info" tabindex="0" role="button" aria-label="More info">i<span class="tip" role="tooltip">Where most of the beatmap's difficulties snap their notes to triplets (typically drum fills), the grid switches to triplets for those beats. Turn this off to use your chosen rhythm grid everywhere.</span></span></label>
+            <label class="switch"><input type="checkbox" id="useTriplets"><span class="track"></span><span>Triplet fills from the <span id="tripletSource">beatmap</span></span> <span class="info" tabindex="0" role="button" aria-label="More info">i<span class="tip" role="tooltip">Where most of the beatmap's or chart's difficulties snap their notes to triplets (typically drum fills), the grid switches to triplets for those beats. Turn this off to use your chosen rhythm grid everywhere.</span></span></label>
             <small class="triplet-info" id="tripletInfo"></small>
           </div>
           <div class="field">
-            <label for="pattern">Rhythm grid <span class="info" tabindex="0" role="button" aria-label="More info">i<span class="tip" role="tooltip"><b>Automatic</b> uses 8ths and 16ths (only 8ths above 200 BPM), and switches to triplets, with sextuplets where needed, in the sections the beatmap maps in triplets. Each stroke snaps to the nearest note of this grid. You don't have to play every note: an 8th-note grid also lets you play quarters, or any mix of the two. <b>Hybrid</b> grids snap to the coarser notes (filled) when you're within the good window, and only use the finer ones (outlined) otherwise, so loose 8ths aren't mistaken for 16ths.</span></span></label>
+            <label for="pattern">Rhythm grid <span class="info" tabindex="0" role="button" aria-label="More info">i<span class="tip" role="tooltip"><b>Automatic</b> uses 8ths and 16ths (only 8ths above 200 BPM), and switches to triplets, with sextuplets where needed, in the sections the beatmap or chart has in triplets. Each stroke snaps to the nearest note of this grid. You don't have to play every note: an 8th-note grid also lets you play quarters, or any mix of the two. <b>Hybrid</b> grids snap to the coarser notes (filled) when you're within the good window, and only use the finer ones (outlined) otherwise, so loose 8ths aren't mistaken for 16ths.</span></span></label>
             <select id="pattern"></select>
             <small class="auto-info" id="autoInfo" hidden></small>
           </div>
@@ -368,7 +369,7 @@
 
   <!-- Results -->
   <!-- Add songs -->
-  <dialog id="addDialog" class="dialog mid">
+  <dialog id="addDialog" class="dialog wide">
     <div class="dialog-inner">
       <header class="dialog-head"><h2>Add songs</h2><button class="btn icon" id="addClose" type="button" aria-label="Close">✕</button></header>
       <div class="add-options">
@@ -381,6 +382,11 @@
           <h4>osu! beatmaps</h4>
           <p class="hint">.osz files or unpacked beatmap folders</p>
           <p>Beatmaps come with hand-made timing, so they're more accurate and follow tempo changes, which makes them ideal for more complex songs. Browse them at <a href="https://osu.ppy.sh/beatmapsets" target="_blank" rel="noopener">osu.ppy.sh/beatmapsets</a> or on the mirror <a href="https://beatconnect.io/?sort=ranked_date" target="_blank" rel="noopener">beatconnect.io</a>. Add the downloaded .osz files, or beatmap folders straight from your osu! Songs folder.</p>
+        </section>
+        <section class="add-option">
+          <h4>Clone Hero charts</h4>
+          <p class="hint">.sng or .zip files, or chart folders</p>
+          <p>Charts have hand-made timing too, and their drum parts show where the fills are in triplets. Find them at <a href="https://www.enchor.us" target="_blank" rel="noopener">enchor.us</a>. Add the downloaded files, or song folders straight from your Clone Hero songs folder.</p>
         </section>
       </div>
       <ul class="add-notes">

@@ -87,7 +87,7 @@ export function parseOsu(text) {
  */
 export async function loadBeatmapSet(entries) {
   const osuEntries = entries.filter(e => /\.osu$/i.test(e.name));
-  if (!osuEntries.length) throw new Error('No .osu file found. Drop an .osz, or an .osu file together with its audio file.');
+  if (!osuEntries.length) throw new Error('No beatmap, chart or audio file found. Drop an .osz, a Clone Hero chart (.sng, .zip or folder), or an audio file.');
 
   const decoder = new TextDecoder();
   const diffs = [];
@@ -123,6 +123,7 @@ export async function loadBeatmapSet(entries) {
 
 export function songKey(d) {
   if (d.plain) return `audio:${d.audioFilename.toLowerCase()}`;
+  if (d.format === 'ch') return `ch:${d.artist} - ${d.title} (${d.creator})`;
   return d.setId ? `set:${d.setId}` : `${d.artistAscii || d.artist} - ${d.titleAscii || d.title} (${d.creator})`;
 }
 

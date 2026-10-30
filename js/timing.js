@@ -1,7 +1,9 @@
 // Tempo maps ("sections"), rhythm patterns and the expected-note grid derived from them.
 //
-// A section is { start, end, beatLength, meter } in song milliseconds. Songs get one section
-// per osu! red line. Metronome mode gets one section, or one per step of the speed trainer.
+// A section is { start, end, beatLength, meter, phase, sig? } in song milliseconds. Songs get one section
+// per timing point; `phase` is the beat of the bar it starts on (0 for osu! red lines, which always
+// start a bar, but Clone Hero tempo changes can fall mid-bar). Metronome mode gets one section, or
+// one per step of the speed trainer.
 
 /**
  * Preset rhythms. `grid` has one character per subdivision of a beat: x = hit, . = rest.
@@ -9,7 +11,7 @@
  * they're within the good window, and only fall back to the finer notes (e.g. 16ths) otherwise.
  */
 export const PATTERNS = [
-  { id: 'auto', name: 'Automatic (from the beatmap)', subdiv: 4, grid: 'xxxx', primary: 'x.x.' },
+  { id: 'auto', name: 'Automatic (from the beatmap or chart)', subdiv: 4, grid: 'xxxx', primary: 'x.x.' },
   { id: 'hybrid-8-16', name: '8ths, 16ths allowed (hybrid)', subdiv: 4, grid: 'xxxx', primary: 'x.x.' },
   { id: 'hybrid-4-8', name: 'Quarters, 8ths allowed (hybrid)', subdiv: 2, grid: 'xx', primary: 'x.' },
   { id: 'hybrid-8-trip', name: '8ths, triplets allowed (hybrid)', subdiv: 6, grid: 'x.xxx.', primary: 'x..x..' },
@@ -62,7 +64,7 @@ export function songSections(redLines, endMs, shiftMs = 0) {
   redLines.forEach((r, i) => {
     const start = r.time + shiftMs;
     const end = i + 1 < redLines.length ? redLines[i + 1].time + shiftMs : endMs;
-    if (end - start >= 1) sections.push({ start, end, beatLength: r.beatLength, meter: r.meter || 4 });
+    if (end - start >= 1) sections.push({ start, end, beatLength: r.beatLength, meter: r.meter || 4, phase: r.phase || 0, sig: r.sig });
   });
   return sections;
 }
@@ -100,26 +102,27 @@ export function buildGrid(sections, pattern, { tripletBeats = [], sextupletBeats
   let bar0 = 0;
 
   sections.forEach((s, sec) => {
-    const bl = s.beatLength;
-    const barMs = bl * s.meter;
-    s.bar0 = bar0;
+    const bl = s.beatLength, ph = s.phase || 0;
+    s.bar0 = bar0; // the bar s.start falls in
     if (!(bl >= 20)) return; // safety net: a near-zero beat length would never advance the loops below
 
     for (let k = 0; ; k++) {
       const t = s.start + k * bl;
       if (t >= s.end - EPS) break;
-      const beatInBar = k % s.meter;
-      beats.push({ t, bar: bar0 + Math.floor(k / s.meter), beatInBar, downbeat: beatInBar === 0, sec });
+      const beatInBar = (k + ph) % s.meter;
+      beats.push({ t, bar: barOf(s, t), beatInBar, downbeat: beatInBar === 0, sec });
     }
 
+    // the pattern's cycle (e.g. a 4-beat clave) starts on a downbeat, also when the section doesn't
     const p = patternFor?.(s) ?? pattern;
-    const cycleMs = p.cycle * bl;
+    const lead = ph % p.cycle;
     outer:
     for (let c = 0; ; c++) {
-      const c0 = s.start + c * cycleMs;
+      const c0 = s.start + (c * p.cycle - lead) * bl;
       if (c0 >= s.end - EPS) break;
       for (const h of p.hits) {
         const t = c0 + h.pos * bl;
+        if (t < s.start - EPS) continue;
         if (t >= s.end - EPS) break outer;
         const beatPos = (t - s.start) / bl;
         const onBeat = Math.abs(beatPos - Math.round(beatPos)) < 1e-6;
@@ -128,13 +131,15 @@ export function buildGrid(sections, pattern, { tripletBeats = [], sextupletBeats
           slot: h.slot,
           primary: h.primary,
           sec,
-          bar: bar0 + Math.floor((t - s.start) / barMs + 1e-9),
+          bar: barOf(s, t),
           onBeat,
-          downbeat: onBeat && Math.round(beatPos) % s.meter === 0,
+          downbeat: onBeat && (Math.round(beatPos) + ph) % s.meter === 0,
         });
       }
     }
-    bar0 += Math.max(1, Math.ceil((s.end - s.start - EPS) / barMs));
+    // a section that continues mid-bar stays in the bar it starts in
+    const span = ph + (s.end - s.start - EPS) / bl, next = sections[sec + 1];
+    bar0 += next?.phase ? Math.floor(span / s.meter + EPS / bl) : Math.max(1, Math.ceil(span / s.meter));
   });
   if (!tripletBeats.length && !sextupletBeats.length) return { beats, notes };
 
@@ -152,27 +157,26 @@ export function buildGrid(sections, pattern, { tripletBeats = [], sextupletBeats
   const inside = t => tripletBeats.some(b => t > b.start + EPS && t < b.end - EPS);
   const out = tripletBeats.length ? notes.filter(n => !inside(n.t)) : notes;
   for (const b of tripletBeats) {
-    const { sec, s, bl } = b, barMs = s.beatLength * s.meter;
+    const { sec, s, bl } = b;
     const beatPos = Math.round((b.start - s.start) / s.beatLength);
-    const bar = s.bar0 + Math.floor(beatPos / s.meter);
     const onBeatNote = out.find(n => Math.abs(n.t - b.start) < EPS);
     if (onBeatNote) onBeatNote.primary = true;
-    else out.push({ t: b.start, slot: 0, primary: true, sec, bar, onBeat: true, downbeat: beatPos % s.meter === 0 });
+    else out.push({ t: b.start, slot: 0, primary: true, sec, bar: s.bar0 + Math.floor((beatPos + (s.phase || 0)) / s.meter), onBeat: true, downbeat: (beatPos + (s.phase || 0)) % s.meter === 0 });
     for (const k of [1, 2]) {
       if (b.start + (k * bl) / 3 >= b.end - EPS) continue;
-      out.push({ t: b.start + (k * bl) / 3, slot: TRIPLET_SLOT + k, primary: true, sec, bar: s.bar0 + Math.floor((b.start + (k * bl) / 3 - s.start) / barMs + 1e-9), onBeat: false, downbeat: false, triplet: true });
+      out.push({ t: b.start + (k * bl) / 3, slot: TRIPLET_SLOT + k, primary: true, sec, bar: barOf(s, b.start + (k * bl) / 3), onBeat: false, downbeat: false, triplet: true });
     }
   }
   // Sextuplet positions from the automatic grid, as secondary notes so the triplets are preferred.
   const taken = new Set(out.map(n => Math.round(n.t)));
   const addPositions = (list, fractions, slot0, flag) => {
     for (const b of clip(list)) {
-      const { sec, s, bl } = b, barMs = s.beatLength * s.meter;
+      const { sec, s, bl } = b;
       fractions.forEach((f, k) => {
         const t = b.start + f * bl;
         if (t >= b.end - EPS || taken.has(Math.round(t))) return;
         taken.add(Math.round(t));
-        out.push({ t, slot: slot0 + k + 1, primary: false, sec, bar: s.bar0 + Math.floor((t - s.start) / barMs + 1e-9), onBeat: false, downbeat: false, [flag]: true });
+        out.push({ t, slot: slot0 + k + 1, primary: false, sec, bar: barOf(s, t), onBeat: false, downbeat: false, [flag]: true });
       });
     }
   };
@@ -180,6 +184,9 @@ export function buildGrid(sections, pattern, { tripletBeats = [], sextupletBeats
   out.sort((a, b) => a.t - b.t);
   return { beats, notes: out };
 }
+
+/** Bar number of time t in section s (after buildGrid has set s.bar0). */
+const barOf = (s, t) => s.bar0 + Math.floor(((t - s.start) / s.beatLength + (s.phase || 0)) / s.meter + 1e-9);
 
 /** Slot ids of triplet-fill notes (TRIPLET_SLOT + 1 and + 2), kept apart from the pattern's slots. */
 export const TRIPLET_SLOT = 100;

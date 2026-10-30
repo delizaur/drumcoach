@@ -140,6 +140,10 @@
               <label for="musicVolume">Music volume</label>
               <input id="musicVolume" type="range" min="0" max="1" step="0.01">
             </div>
+            <div class="field" id="chartVolumeField" hidden>
+              <label for="chartVolume">Chart note sounds <span class="info" tabindex="0" role="button" aria-label="More info">i<span class="tip" role="tooltip">Plays the chart's notes with the built-in drum sounds, on top of the music. Turn it up to hear how well the chart matches the song.</span></span></label>
+              <input id="chartVolume" type="range" min="0" max="1" step="0.01">
+            </div>
             <label class="switch" id="drumStemRow" hidden><input type="checkbox" id="drumStem"><span class="track"></span>Drums in the music <span class="info" tabindex="0" role="button" aria-label="More info">i<span class="tip" role="tooltip">This chart comes with the drums as a separate audio track. Turn this off to play along without the original drummer.</span></span></label>
             <label class="switch"><input type="checkbox" id="songClick"><span class="track"></span>Click track over the song</label>
         </div>

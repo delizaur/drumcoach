@@ -49,11 +49,11 @@ export class DrumKit {
     return buf;
   }
 
-  /** Plays the voice for a MIDI note right away. velocity 1–127. */
-  play(note, velocity = 100) {
+  /** Plays the voice for a MIDI note, right away or at an AudioContext time. velocity 1–127. */
+  play(note, velocity = 100, at = 0) {
     const voice = NOTE_VOICE[note] || 'snare';
     const v = Math.pow(Math.min(127, Math.max(1, velocity)) / 127, 1.4);
-    const t = this.ctx.currentTime;
+    const t = Math.max(at, this.ctx.currentTime);
     if (voice === 'hatClosed' || voice === 'hatPedal') this.chokeHats(t);
     // Voices write to this.out; point it at a per-hit level stage for the duration of the call.
     const level = this.ctx.createGain();
@@ -62,7 +62,7 @@ export class DrumKit {
     const out = this.out;
     this.out = level;
     try { this[voice](t, v); } finally { this.out = out; }
-    setTimeout(() => level.disconnect(), 2500);
+    setTimeout(() => level.disconnect(), 2500 + (t - this.ctx.currentTime) * 1000);
   }
 
   // ---- building blocks

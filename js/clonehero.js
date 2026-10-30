@@ -271,13 +271,23 @@ export async function loadChartSet(entries) {
   const yes = v => /^(true|1)$/i.test(String(v ?? '').trim());
   const hasFifth = Object.values(chart.notes).some(list => list.some(n => n.pad === 5));
   const kind = yes(ini.five_lane_drums) ? 'five' : yes(ini.pro_drums) || chart.pro ? 'pro' : hasFifth ? 'five' : 'four';
-  const diffs = DIFFS.filter(d => chart.notes[d]).map(d => {
+  const diffs = chartDifficulties(chart, toMs, kind).map(d => ({ ...base, ...d }));
+  return diffs.length ? diffs : [{ ...base, version: 'No drums chart', objects: [] }];
+}
+
+/** Each charted difficulty's notes as { t, lane, accept, plus }, one per drum and time, and its note times. */
+function chartDifficulties(chart, toMs, kind) {
+  return DIFFS.filter(d => chart.notes[d]).map(d => {
     const list = chart.notes[d], seen = new Set();
-    // each difficulty's notes as { t, lane, accept, plus }, one per drum and time
     const chartNotes = list.map(n => ({ t: toMs(n.tick), plus: n.plus, ...placeNote(n, kind) }))
       .filter(n => { const k = `${n.t}|${n.lane}|${n.plus}`; return !seen.has(k) && seen.add(k); })
       .sort((a, b) => a.t - b.t || a.lane - b.lane);
-    return { ...base, version: d, chartNotes, objects: [...new Set(list.map(n => n.tick))].map(toMs).sort((a, b) => a - b) };
+    return { version: d, chartNotes, objects: [...new Set(list.map(n => n.tick))].map(toMs).sort((a, b) => a - b) };
   });
-  return diffs.length ? diffs : [{ ...base, version: 'No drums chart', objects: [] }];
+}
+
+/** The notes of a chart DrumCoach generated itself (see autochart.js): its Expert pro drums. */
+export function generatedChartNotes(text) {
+  const chart = parseChart(text);
+  return chartDifficulties(chart, chartTiming(chart, chart.meta.offsetMs).toMs, 'pro')[0]?.chartNotes || [];
 }

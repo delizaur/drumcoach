@@ -3,7 +3,8 @@ import { MidiInput, drumName, padOf, LANES } from './midi.js';
 import { readZip } from './zip.js';
 import { readSng } from './sng.js';
 import { loadBeatmapSet, songKey, tempoSummary } from './osu.js';
-import { loadChartSet, isChartFile } from './clonehero.js';
+import { loadChartSet, isChartFile, generatedChartNotes } from './clonehero.js';
+import { transcribeDrums, chartText, AUTO_CHART_VERSION } from './autochart.js';
 import { analyzeSync, SYNC_VERSION } from './beatsync.js';
 import { detectTempo, tempoTiming, TEMPO_VERSION } from './tempo.js';
 import { PATTERNS, makePattern, songSections, metronomeSections, buildGrid, sectionAt, TRIPLET_SLOT, SEXTUPLET_SLOT } from './timing.js';
@@ -34,7 +35,7 @@ const DEFAULTS = {
   pattern: 'auto', customSubdiv: 4, customGrid: 'x..x..x.',
   clickMode: 'beats', clickVolume: 0.7, strictness: 'normal',
   // song
-  rate: 1, musicVolume: 0.85, songClick: false, drumStem: true, lastSong: null, songPrefs: {},
+  rate: 1, musicVolume: 0.85, chartVolume: 0, songClick: false, drumStem: true, lastSong: null, songPrefs: {},
   autoSync: true, syncFineTune: 0, syncMigrated: false, useTriplets: true,
   openGroups: { playalongGroup: true, libraryBox: true }, // collapsible panel sections
   timelineZoom: 1, showWindows: false, // scrolling grid view
@@ -136,6 +137,16 @@ function playPad(note, velocity, { keyboard = false } = {}) {
   kit ||= new DrumKit(audio.ctx);
   kit.volume = settings.padVolume;
   kit.play(note, velocity);
+}
+
+// Chart note sounds: their own kit, so their volume is separate from the pads'. One voice per lane.
+const LANE_VOICES = [51, 42, 47, 38, 36]; // ride, closed hi-hat, mid tom, snare, kick
+let chartKit = null;
+
+/** The chart's notes as drum sounds to schedule, or none when they're muted. */
+function noteSounds(notes, from) {
+  if (!settings.chartVolume) return [];
+  return notes.filter(n => n.t >= from - 1).map(n => ({ t: n.t, note: LANE_VOICES[n.lane] }));
 }
 
 // Browsers only allow audio after a user gesture, and MIDI input doesn't count as one.
@@ -286,12 +297,18 @@ async function startSession({ preview = false, from = null } = {}) {
     scorer: new Scorer(grid.notes, { windows, rate, scoreFrom }),
     clicks: buildClicks(grid, clickMode, hiddenBar, startPos),
     clickCursor: 0,
+    noteSounds: play ? noteSounds(grid.notes, startPos) : [],
+    noteCursor: 0,
     now: startPos,
     lastUi: 0,
     lastScatter: 0,
     scatterDirty: true,
   };
   recent.length = 0;
+  if (session.noteSounds.length) {
+    chartKit ||= new DrumKit(audio.ctx);
+    chartKit.volume = settings.chartVolume;
+  }
 
   audio.start({ buffer, startPos, rate, leadIn: 0.15 });
   session.dropoutsAtStart = audio.dropoutStats();
@@ -305,15 +322,21 @@ async function startSession({ preview = false, from = null } = {}) {
   lockSetup(true, preview ? $('tempoBox') : null);
 }
 
+/** Schedules the clicks and chart note sounds of the next 150 ms of song. */
 function scheduleClicks() {
   const s = session;
-  if (!s || s.clickCursor >= s.clicks.length) return;
+  if (!s || (s.clickCursor >= s.clicks.length && s.noteCursor >= s.noteSounds.length)) return;
   const ctxNow = audio.ctx.currentTime;
   const horizon = audio.renderSongTime() + 150 * s.rate;
   while (s.clickCursor < s.clicks.length && s.clicks[s.clickCursor].t <= horizon) {
     const ev = s.clicks[s.clickCursor++];
     const when = audio.ctxAtSongTime(ev.t);
     if (when >= ctxNow) audio.click(when, ev.kind);
+  }
+  while (s.noteCursor < s.noteSounds.length && s.noteSounds[s.noteCursor].t <= horizon) {
+    const ev = s.noteSounds[s.noteCursor++];
+    const when = audio.ctxAtSongTime(ev.t);
+    if (when >= ctxNow) chartKit.play(ev.note, 100, when);
   }
 }
 
@@ -422,13 +445,60 @@ function makeGrid(sections, pattern, rate, triplets, sextuplets) {
 const CHART_SUBDIVS = [1, 2, 4, 3, 6, 8, 12, 16];
 const CHART_SLOT_LABELS = { 1: 'quarters', 2: '8ths', 4: '16ths', 3: 'triplets', 6: 'sextuplets', 8: '32nds', 12: '32nd triplets', 16: '64ths', 0: 'off the beat grid' };
 
-/** The chart difficulty being played, or null in free play (also for songs that aren't charts). */
+/**
+ * The chart difficulty being played, or null in free play (also for songs that aren't charts). Any
+ * song can also play its auto-generated chart.
+ */
 function chartPlay() {
-  const v = song?.diff?.format === 'ch' ? songPrefs().play : null;
-  const diff = v && v !== 'free' ? song.diffs[parseInt(v, 10)] : null;
+  const v = song?.diff ? songPrefs().play : null;
+  if (v === 'auto') {
+    const diff = autoChart();
+    return diff ? { diff, plus: false, name: diff.version, auto: true } : null;
+  }
+  const diff = v && v !== 'free' && song.diff.format === 'ch' ? song.diffs[parseInt(v, 10)] : null;
   if (!diff?.chartNotes?.length) return null;
   const plus = v.endsWith('+');
   return { diff, plus, name: diff.version + (plus ? '+' : '') };
+}
+
+/**
+ * The song's auto-generated chart, written on its current beat grid. The hits come from the audio, so
+ * the chart is rebuilt whenever the grid moves (another tempo option, or a sync change); its notes
+ * are in song time, already shifted.
+ */
+function autoChart() {
+  const hits = songPrefs().autoHits;
+  if (hits?.v !== AUTO_CHART_VERSION) return null;
+  const shift = totalSync(), c = song.autoChart;
+  if (c?.hits === hits && c.timing === song.diff.timing && c.shift === shift) return c.diff;
+  const text = chartText(hits.drums, songTiming().sections, song.diff);
+  const chartNotes = text ? generatedChartNotes(text) : [];
+  const diff = chartNotes.length ? { version: 'Auto-generated', chartNotes, text } : null;
+  song.autoChart = { hits, timing: song.diff.timing, shift, diff };
+  return diff;
+}
+
+/** Transcribes the song's drums and switches to the generated chart. */
+async function generateChart() {
+  const target = song, prefs = songPrefs();
+  target.generating = true;
+  showSongError('');
+  renderPlayMode();
+  try {
+    prefs.autoHits = { v: AUTO_CHART_VERSION, drums: await transcribeDrums(target.buffer) };
+    prefs.play = 'auto';
+    save();
+  } catch (err) {
+    console.error(err);
+    if (song === target) showSongError(`Couldn't generate the chart: ${err?.message || err}`);
+  } finally {
+    target.generating = false;
+    if (song === target) {
+      renderPlayMode();
+      resetLive();
+      drawSongChart();
+    }
+  }
 }
 
 /**
@@ -436,7 +506,7 @@ function chartPlay() {
  * their bars). Expert+ adds the 2x kick notes.
  */
 function chartGridNotes(sections, play) {
-  const shift = totalSync(), notes = [];
+  const shift = play.auto ? 0 : totalSync(), notes = [];
   for (const c of play.diff.chartNotes) {
     if (c.plus && !play.plus) continue;
     const t = c.t + shift, sec = sectionAt(sections, t), s = sections[sec];
@@ -1119,18 +1189,31 @@ function renderPlayMode() {
       opts.push([String(i), d.version]);
     });
   }
+  const generated = songPrefs().autoHits?.v === AUTO_CHART_VERSION;
+  opts.push(['auto', song.generating ? 'Generating chart…' : generated ? 'Auto-generated (experimental)' : 'Auto-generate chart (experimental)']);
   sel.innerHTML = opts.map(([v, label]) => `<option value="${v}">${escapeHtml(label)}</option>`).join('')
     + (song.diff.format === 'ch' ? '' : '<option disabled>More difficulties available on Clone Hero charts</option>');
   const play = chartPlay();
-  sel.value = play ? `${song.diffs.indexOf(play.diff)}${play.plus ? '+' : ''}` : 'free';
-  sel.title = song.diff.format === 'ch'
+  sel.value = song.generating || play?.auto ? 'auto' : play ? `${song.diffs.indexOf(play.diff)}${play.plus ? '+' : ''}` : 'free';
+  sel.disabled = !!song.generating;
+  sel.title = (song.diff.format === 'ch'
     ? 'Free play: jam along on a rhythm grid. A difficulty: play the chart\'s notes, each on its drum.'
-    : 'Free play: jam along on a rhythm grid.';
+    : 'Free play: jam along on a rhythm grid.')
+    + ' Auto-generate: an AI model listens for the drums and charts them on the beat grid.';
 
-  // the rhythm grid settings only apply to free play
+  // the rhythm grid settings only apply to free play, the chart note sounds only to charts
   $('gridChoice').hidden = !!play;
-  $('chartPlayInfo').hidden = !play;
-  if (play) $('chartPlayInfo').innerHTML = `Playing the chart's <b>${escapeHtml(play.name)}</b> notes, each on its drum. Notes you don't play count as skipped. Pick <b>Free play</b> next to the Start button to choose a rhythm grid instead.`;
+  $('chartVolumeField').hidden = !play;
+  const info = $('chartPlayInfo');
+  info.hidden = !play && !song.generating;
+  if (song.generating) {
+    info.innerHTML = 'Listening for the drums to generate a chart. This can take up to a minute.';
+  } else if (play?.auto) {
+    info.innerHTML = 'Playing a chart <b>generated from the audio</b>, each note on its drum, snapped to the beat grid. It\'s experimental: expect missing or extra notes. Notes you don\'t play count as skipped.'
+      + ' <span class="hint">Drum transcription by <a href="https://github.com/MZehren/ADTOF" target="_blank" rel="noopener">ADTOF</a> (Zehren, Alunno, Bientinesi; CC BY-NC-SA 4.0).</span>';
+  } else if (play) {
+    info.innerHTML = `Playing the chart's <b>${escapeHtml(play.name)}</b> notes, each on its drum. Notes you don't play count as skipped. Pick <b>Free play</b> next to the Start button to choose a rhythm grid instead.`;
+  }
 }
 
 function renderTempo() {
@@ -1228,6 +1311,7 @@ window.addEventListener('drop', e => {
 });
 
 $('playMode').onchange = e => {
+  if (e.target.value === 'auto' && songPrefs().autoHits?.v !== AUTO_CHART_VERSION) { generateChart(); return; }
   songPrefs().play = e.target.value;
   save();
   renderPlayMode();
@@ -1337,6 +1421,7 @@ bind('rate', 'rate', { after: v => { $('rateLabel').textContent = `${v.toFixed(2
 $('rateLabel').textContent = `${settings.rate.toFixed(2)}×`;
 bind('musicVolume', 'musicVolume', { after: v => audio.setMusicVolume(v) });
 bind('clickVolume', 'clickVolume', { after: v => audio.setClickVolume(v) });
+bind('chartVolume', 'chartVolume', { after: v => { if (chartKit) chartKit.volume = v; } });
 bind('songClick', 'songClick', { event: 'change', after: syncClickControls });
 bind('drumStem', 'drumStem', { event: 'change' });
 bind('useTriplets', 'useTriplets', { event: 'change', after: () => { renderAutoInfo(); drawSongChart(); } });

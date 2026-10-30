@@ -160,6 +160,8 @@
         </div>
         <!-- the grid and how it is judged; the click settings above stay with their toggle -->
         <div class="grid-settings">
+          <p class="chart-play-info" id="chartPlayInfo" hidden></p>
+          <div id="gridChoice">
           <div id="tripletRow">
             <label class="switch"><input type="checkbox" id="useTriplets"><span class="track"></span><span>Triplet fills from the <span id="tripletSource">beatmap</span></span> <span class="info" tabindex="0" role="button" aria-label="More info">i<span class="tip" role="tooltip">Where most of the beatmap's or chart's difficulties snap their notes to triplets (typically drum fills), the grid switches to triplets for those beats. Turn this off to use your chosen rhythm grid everywhere.</span></span></label>
             <small class="triplet-info" id="tripletInfo"></small>
@@ -185,6 +187,7 @@
             <small>One character per subdivision: <code>x</code> = hit, <code>.</code> = rest. The pattern repeats from each tempo change.</small>
           </div>
           <div class="pattern-preview" id="patternPreview" aria-hidden="true"></div>
+          </div>
           <div class="field">
             <label>Strictness <span class="info up" tabindex="0" role="button" aria-label="More info">i<span class="tip" role="tooltip" id="windowsHint"></span></span></label>
             <div class="seg" id="strictness" role="radiogroup">
@@ -213,6 +216,10 @@
           <div class="now-bpm"><span id="bpmNow">—</span><small>BPM</small></div>
           <div class="now-pos" id="posNow">Ready</div>
         </div>
+        <div class="play-mode" id="playModeBox" hidden>
+          <label for="playMode">Difficulty</label>
+          <select id="playMode"></select>
+        </div>
       </div>
 
       <div class="panel chart">
@@ -223,6 +230,7 @@
             <span class="count great"><b>0</b> great</span>
             <span class="count good"><b>0</b> good</span>
             <span class="count miss" title="Strokes too far from any grid note"><b>0</b> miss</span>
+            <span class="count skipped" id="skippedCount" title="Chart notes you didn't play" hidden><b>0</b> skipped</span>
           </div>
           <small id="chartHint">each dot is a hit, the line is the moving average</small>
         </div>

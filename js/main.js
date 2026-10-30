@@ -175,7 +175,7 @@ function stroke(perfTime, note) {
   if (res.type === 'hit' || res.type === 'miss') {
     recent.push({ err: res.hit.err, j: res.hit.j, at: performance.now(), zones: res.hit.zones });
     if (recent.length > 60) recent.shift();
-    showFeedback(res.hit.j, res.hit.err);
+    showFeedback(res.hit.j, res.hit.err, res.hit.wrong);
   }
   if (res.type !== 'double') session.scatterDirty = true;
 }
@@ -202,6 +202,7 @@ function buildClicks(grid, mode, hiddenBar, from) {
   if (mode === 'pattern') {
     events = events.concat(grid.notes.filter(n => !n.onBeat && audible(n)).map(n => ({ t: n.t, kind: 'sub' })));
     events.sort((a, b) => a.t - b.t);
+    events = events.filter((e, k) => k === 0 || e.t - events[k - 1].t >= 1); // chords: one click
   }
   return events.filter(e => e.t >= from - 1);
 }
@@ -266,13 +267,17 @@ async function startSession({ preview = false, from = null } = {}) {
     }
   }
 
+  const play = settings.mode === 'song' ? chartPlay() : null;
+  if (play) triplets = sextuplets = [];
   const grid = makeGrid(sections, pattern, rate, triplets, sextuplets);
+  if (play) grid.notes = chartGridNotes(sections, play);
   session = {
     preview,
     mode: settings.mode,
     title: settings.mode === 'song'
-      ? `${song.diff.artist} – ${song.diff.title} [${song.diff.version}]`
+      ? `${song.diff.artist} – ${song.diff.title} [${play ? play.name : song.diff.format === 'ch' ? 'Free play' : song.diff.version}]`
       : `Metronome · ${settings.bpm} BPM${settings.trainerOn ? ' (speed trainer)' : ''}`,
+    chart: !!play,
     pattern, windows, sections, rate, startPos, endMs, scoreFrom, hiddenBar,
     lanes: LANES,
     tripletSections: mergeBeats(triplets),
@@ -295,6 +300,7 @@ async function startSession({ preview = false, from = null } = {}) {
 
   $('startBtn').textContent = 'Stop';
   $('startBtn').classList.replace('primary', 'stop');
+  $('playMode').disabled = true;
   $('idleHint').hidden = true;
   lockSetup(true, preview ? $('tempoBox') : null);
 }
@@ -319,8 +325,10 @@ function stopSession(withResults) {
   const d = audio.dropoutStats();
   s.dropouts = { events: d.events - s.dropoutsAtStart.events, ms: d.ms - s.dropoutsAtStart.ms };
   audio.stop();
+  s.scorer.advance(s.now);
 
   $('startBtn').textContent = 'Start';
+  $('playMode').disabled = false;
   $('startBtn').classList.replace('stop', 'primary');
   $('idleHint').hidden = false;
   lockSetup(false);
@@ -342,6 +350,7 @@ function frame() {
   if (s) {
     const now = audio.audibleSongTime();
     s.now = now;
+    s.scorer.advance(now);
     timeline.draw(s);
     if (perfNow - s.lastUi > 100) { s.lastUi = perfNow; updateLive(s); }
     if (s.scatterDirty && perfNow - s.lastScatter > 250) drawScatter(s);
@@ -409,19 +418,57 @@ function makeGrid(sections, pattern, rate, triplets, sextuplets) {
   return buildGrid(sections, pattern, { tripletBeats: triplets, sextupletBeats: sextuplets, patternFor });
 }
 
+// Slots of chart notes, by the finest subdivision of the beat they need (see chartGridNotes).
+const CHART_SUBDIVS = [1, 2, 4, 3, 6, 8, 12, 16];
+const CHART_SLOT_LABELS = { 1: 'quarters', 2: '8ths', 4: '16ths', 3: 'triplets', 6: 'sextuplets', 8: '32nds', 12: '32nd triplets', 16: '64ths', 0: 'off the beat grid' };
+
+/** The chart difficulty being played, or null in free play (also for songs that aren't charts). */
+function chartPlay() {
+  const v = song?.diff?.format === 'ch' ? songPrefs().play : null;
+  const diff = v && v !== 'free' ? song.diffs[parseInt(v, 10)] : null;
+  if (!diff?.chartNotes?.length) return null;
+  const plus = v.endsWith('+');
+  return { diff, plus, name: diff.version + (plus ? '+' : '') };
+}
+
+/**
+ * A chart difficulty's notes in grid-note form, on the song's sections (after buildGrid has numbered
+ * their bars). Expert+ adds the 2x kick notes.
+ */
+function chartGridNotes(sections, play) {
+  const shift = totalSync(), notes = [];
+  for (const c of play.diff.chartNotes) {
+    if (c.plus && !play.plus) continue;
+    const t = c.t + shift, sec = sectionAt(sections, t), s = sections[sec];
+    if (!s) continue;
+    const pos = (t - s.start) / s.beatLength, beat = Math.round(pos), ph = s.phase || 0;
+    const onBeat = Math.abs(pos - beat) * s.beatLength < 2;
+    const frac = pos - Math.floor(pos);
+    const slot = CHART_SUBDIVS.find(d => Math.abs(frac * d - Math.round(frac * d)) * s.beatLength / d < 2) ?? 0;
+    notes.push({
+      t, lane: c.lane, accept: c.accept, primary: true, sec, slot,
+      bar: (s.bar0 ?? 0) + Math.floor((pos + ph) / s.meter + 1e-9), onBeat,
+      downbeat: onBeat && (beat + ph) % s.meter === 0,
+    });
+  }
+  return notes;
+}
+
 /** Empty chart spanning the loaded song, so the playhead and seeking work before playing. */
 function drawSongChart() {
   if (session || settings.mode !== 'song' || !song?.diff) return;
   const windows = STRICTNESS[settings.strictness] || STRICTNESS.normal;
   // scaled like the session's chart will be, from the grid it will use
   const { sections, triplets, sextuplets } = songTiming();
-  const notes = sections.length ? makeGrid(sections, currentPattern(), settings.rate, triplets, sextuplets).notes : [];
+  const play = chartPlay();
+  let notes = sections.length ? makeGrid(sections, currentPattern(), settings.rate, play ? [] : triplets, play ? [] : sextuplets).notes : [];
+  if (play && sections.length) notes = chartGridNotes(sections, play);
   scatter.draw({
     hits: [], misses: [], windows,
     good: new Scorer(notes, { windows, rate: settings.rate }).typicalGood(0, song.durationMs),
     x0: 0, x1: song.durationMs, timeAxis: true,
     sectionStarts: tempoChanges(sections),
-    tripletSections: settings.useTriplets && song.triplets?.length
+    tripletSections: !play && settings.useTriplets && song.triplets?.length
       ? mergeBeats(song.triplets).map(f => ({ start: f.start + totalSync(), end: f.end + totalSync() })) : null,
   });
 }
@@ -505,7 +552,9 @@ function tendency(m) {
 function updateLive(s) {
   const st = s.scorer.stats();
   $('tAcc').textContent = st.accuracy == null ? '—' : `${(st.accuracy * 100).toFixed(1)}%`;
-  $('tAccSub').textContent = `${st.nHits} on the grid · ${st.counts[MISS]} off`;
+  $('tAccSub').textContent = st.chart
+    ? `${st.nHits} played · ${st.skipped} skipped · ${st.counts[MISS]} off`
+    : `${st.nHits} on the grid · ${st.counts[MISS]} off`;
   $('tMean').textContent = st.nHits ? fmtMs(st.mean) : '—';
   $('tMeanSub').textContent = st.nHits >= 4 ? `last 16: ${tendency(s.scorer.recentMean(16))}` : ' ';
   $('tSd').innerHTML = st.nHits > 1 ? `${st.sd.toFixed(1)}<small>ms</small>` : '—';
@@ -531,6 +580,8 @@ function updateLive(s) {
 function renderCounts(st) {
   const els = $('counts').querySelectorAll('b');
   st.counts.forEach((v, k) => { els[k].textContent = v; });
+  $('skippedCount').hidden = !st.chart;
+  $('skippedCount').querySelector('b').textContent = st.skipped || 0;
 }
 
 function resetLive() {
@@ -538,14 +589,14 @@ function resetLive() {
   for (const id of ['tAccSub', 'tMeanSub', 'tSdSub']) $(id).textContent = ' ';
   $('tStreak').textContent = '0';
   $('tStreakSub').textContent = 'best 0';
-  renderCounts({ counts: [0, 0, 0, 0] });
+  renderCounts({ counts: [0, 0, 0, 0], chart: !!chartPlay() });
 }
 
 const JUDGE_COLOR = ['var(--perfect)', 'var(--great)', 'var(--good)', 'var(--miss)'];
-function showFeedback(j, err) {
+function showFeedback(j, err, wrongDrum = false) {
   const el = $('feedback');
   el.style.color = JUDGE_COLOR[j];
-  const detail = Math.abs(err) < 1 ? 'on time' : `${fmtMs(err)} ${err < 0 ? 'early' : 'late'}`;
+  const detail = wrongDrum ? 'wrong drum' : Math.abs(err) < 1 ? 'on time' : `${fmtMs(err)} ${err < 0 ? 'early' : 'late'}`;
   el.innerHTML = `${JUDGMENTS[j]}<small>${detail || '&nbsp;'}</small>`;
   el.classList.remove('show');
   void el.offsetWidth; // restart the animation
@@ -592,22 +643,24 @@ function insightsFor(st, slotRows, tempoRows, laneRows) {
   }
 
   const missRate = st.counts[MISS] / st.judged;
-  if (missRate > 0.1) out.push(`${(missRate * 100).toFixed(0)}% of your strokes were too far from the grid and counted as misses.`);
+  if (missRate > 0.1) out.push(`${(missRate * 100).toFixed(0)}% of your strokes were too far from ${st.chart ? 'the chart\'s notes on their drum' : 'the grid'} and counted as misses.`);
+  const skipRate = st.chart ? st.skipped / (st.nHits + st.skipped) : 0;
+  if (skipRate > 0.1) out.push(`You skipped ${(skipRate * 100).toFixed(0)}% of the chart's notes. If that's too many to keep up with, try an easier difficulty or a slower speed.`);
   if (st.extra > Math.max(4, 0.1 * st.judged)) out.push(`${st.extra} strokes doubled up on a grid note that was already played. If a pad you aren't practicing with (like the hi-hat pedal) caused them, mute it in Settings. If you're playing faster notes on purpose, pick a finer rhythm grid.`);
   return out;
 }
 
-function breakdownTable(title, rows) {
+function breakdownTable(title, rows, chart = false) {
   const cell = v => `<td class="${v < -2 ? 'early' : v > 2 ? 'late' : ''}">${fmtMs(v)}</td>`;
   return `<div><p class="cap">${title}</p><table class="breakdown">
-    <thead><tr><th></th><th>on grid</th><th>off</th><th>avg</th><th>σ</th></tr></thead>
+    <thead><tr><th></th><th>${chart ? 'played' : 'on grid'}</th><th>off</th><th>avg</th><th>σ</th></tr></thead>
     <tbody>${rows.map(r => `<tr><td>${escapeHtml(r.label)}</td><td>${r.n}</td><td>${r.misses}</td>${r.n ? cell(r.mean) : '<td>—</td>'}<td>${r.n > 1 ? `${r.sd.toFixed(1)} ms` : '—'}</td></tr>`).join('')}</tbody>
   </table></div>`;
 }
 
 function showResults(s) {
   const st = s.scorer.stats();
-  const slotLabel = new Map(s.pattern.hits.map(h => [h.slot, h.label]));
+  const slotLabel = new Map(s.chart ? Object.entries(CHART_SLOT_LABELS).map(([k, v]) => [Number(k), v]) : s.pattern.hits.map(h => [h.slot, h.label]));
   slotLabel.set(TRIPLET_SLOT + 1, 'trip (fills)');
   slotLabel.set(TRIPLET_SLOT + 2, 'let (fills)');
   for (let k = 1; k <= 3; k++) slotLabel.set(SEXTUPLET_SLOT + k, 'sextuplet (fills)');
@@ -639,7 +692,9 @@ function showResults(s) {
       <div class="tile"><div class="tile-label">Accuracy</div><div class="tile-value">${acc}</div><div class="tile-sub">${st.counts[0]} perfect · ${st.counts[1]} great · ${st.counts[2]} good</div></div>
       <div class="tile"><div class="tile-label">Average offset</div><div class="tile-value">${st.nHits ? fmtMs(st.mean, 1) : '—'}</div><div class="tile-sub">${st.nHits ? tendency(st.mean) : ''}</div></div>
       <div class="tile"><div class="tile-label">Consistency <span class="nocase">(σ)</span></div><div class="tile-value">${st.nHits > 1 ? st.sd.toFixed(1) : '—'}<small>ms</small></div><div class="tile-sub">UR ${st.ur.toFixed(0)}</div></div>
-      <div class="tile"><div class="tile-label">Strokes</div><div class="tile-value">${st.nHits}<small>/ ${st.judged} on grid</small></div><div class="tile-sub">${st.counts[MISS]} off the grid · ${st.extra} doubled · best streak ${st.maxStreak}</div></div>
+      ${st.chart
+        ? `<div class="tile"><div class="tile-label">Notes</div><div class="tile-value">${st.nHits}<small>/ ${st.nHits + st.skipped} played</small></div><div class="tile-sub">${st.skipped} skipped · ${st.counts[MISS]} off · best streak ${st.maxStreak}</div></div>`
+        : `<div class="tile"><div class="tile-label">Strokes</div><div class="tile-value">${st.nHits}<small>/ ${st.judged} on grid</small></div><div class="tile-sub">${st.counts[MISS]} off the grid · ${st.extra} doubled · best streak ${st.maxStreak}</div></div>`}
     </div>
     <div class="insights"><ul>${insightsFor(st, slotRows, tempoRows, laneRows).map(t => `<li>${t}</li>`).join('')}</ul></div>
     <div class="res-charts">
@@ -647,9 +702,9 @@ function showResults(s) {
       <div><p class="cap">Distribution (dashed line = average)</p><canvas id="resHist"></canvas></div>
     </div>
     <div class="res-tables">
-      ${laneRows.length > 1 ? breakdownTable('By drum', laneRows) : ''}
-      ${slotRows.length > 1 ? breakdownTable('By subdivision', slotRows) : ''}
-      ${tempoRows.length > 1 ? breakdownTable('By tempo', tempoRows) : ''}
+      ${laneRows.length > 1 ? breakdownTable('By drum', laneRows, st.chart) : ''}
+      ${slotRows.length > 1 ? breakdownTable('By subdivision', slotRows, st.chart) : ''}
+      ${tempoRows.length > 1 ? breakdownTable('By tempo', tempoRows, st.chart) : ''}
     </div>`;
 
   const offBtn = $('resultsOffset');
@@ -1004,6 +1059,7 @@ function renderSongInfo() {
   $('songInfo').hidden = !has;
   $('songSettings').hidden = !has || settings.mode !== 'song';
   $('tripletRow').hidden = !has || settings.mode !== 'song' || !!song.diff.plain;
+  renderPlayMode();
   $('dropZone').querySelector('strong').textContent = 'Add songs';
   const bgCss = has && song.bgUrl ? `url("${song.bgUrl}")` : '';
   $('songBg').style.backgroundImage = bgCss;
@@ -1048,6 +1104,33 @@ function renderSongInfo() {
   $('startAtLabel').textContent = fmtTime(prefs.startAt);
   $('songOffset').value = prefs.offset;
   $('songOffsetLabel').textContent = fmtMs(prefs.offset);
+}
+
+/** The difficulty selector next to the Start button: free play, plus a chart's drum difficulties. */
+function renderPlayMode() {
+  const box = $('playModeBox'), sel = $('playMode');
+  box.hidden = settings.mode !== 'song' || !song?.diff;
+  if (box.hidden) return;
+  const opts = [['free', 'Free play']];
+  if (song.diff.format === 'ch') {
+    song.diffs.forEach((d, i) => {
+      if (!d.chartNotes?.length) return;
+      if (d.chartNotes.some(n => n.plus)) opts.push([`${i}+`, `${d.version}+`]);
+      opts.push([String(i), d.version]);
+    });
+  }
+  sel.innerHTML = opts.map(([v, label]) => `<option value="${v}">${escapeHtml(label)}</option>`).join('')
+    + (song.diff.format === 'ch' ? '' : '<option disabled>More difficulties available on Clone Hero charts</option>');
+  const play = chartPlay();
+  sel.value = play ? `${song.diffs.indexOf(play.diff)}${play.plus ? '+' : ''}` : 'free';
+  sel.title = song.diff.format === 'ch'
+    ? 'Free play: jam along on a rhythm grid. A difficulty: play the chart\'s notes, each on its drum.'
+    : 'Free play: jam along on a rhythm grid.';
+
+  // the rhythm grid settings only apply to free play
+  $('gridChoice').hidden = !!play;
+  $('chartPlayInfo').hidden = !play;
+  if (play) $('chartPlayInfo').innerHTML = `Playing the chart's <b>${escapeHtml(play.name)}</b> notes, each on its drum. Notes you don't play count as skipped. Pick <b>Free play</b> next to the Start button to choose a rhythm grid instead.`;
 }
 
 function renderTempo() {
@@ -1144,6 +1227,13 @@ window.addEventListener('drop', e => {
   handleItems(items);
 });
 
+$('playMode').onchange = e => {
+  songPrefs().play = e.target.value;
+  save();
+  renderPlayMode();
+  resetLive();
+  drawSongChart();
+};
 $('diffSelect').onchange = async e => {
   try {
     await selectDifficulty(song, Number(e.target.value));

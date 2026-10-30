@@ -52,7 +52,8 @@ export class Timeline extends CanvasView {
 
   /**
    * @param {object} s
-   *  now, rate, notes, beats, sections, scorer, lanes (names), hiddenBar(bar)→bool
+   *  now, rate, notes, beats, sections, scorer, lanes (names), hiddenBar(bar)→bool, chart (notes
+   *  are a chart's, each drawn in its drum's lane)
    */
   draw(s) {
     this.last = s;
@@ -157,7 +158,8 @@ export class Timeline extends CanvasView {
         const early = sc.windowsAt(i, -1), late = sc.windowsAt(i, 1);
         for (const [k, j, a, lane] of [['good', 2, 0.3, 0.05], ['great', 1, 0.4, 0.05], ['perfect', 0, 0.55, 0.06]]) {
           const x0 = toX(n.t - early[k] * s.rate), x1 = toX(n.t + late[k] * s.rate);
-          g.fillStyle = alpha(c.judge[j], lane);
+          g.fillStyle = alpha(c.judge[j], s.chart ? a : lane);
+          if (s.chart) { g.fillRect(x0, laneY(n.lane) - 9, x1 - x0, 18); continue; } // in the note's own lane
           g.fillRect(x0, laneTop, x1 - x0, laneBottom - laneTop);
           g.fillStyle = alpha(c.judge[j], a);
           g.fillRect(x0, gridY - 9, x1 - x0, 18);
@@ -165,8 +167,29 @@ export class Timeline extends CanvasView {
       }
     }
 
+    // chart notes: in their drum's lane; a grey cross once skipped
+    for (let i = s.chart ? lowerBound(s.notes, t0) : s.notes.length; i < s.notes.length && s.notes[i].t <= t1; i++) {
+      const n = s.notes[i], x = toX(n.t), y = laneY(n.lane), j = sc.judge[i];
+      const r = Math.min(n.downbeat ? 7.5 : 6.5, laneH * 0.32);
+      if (i < sc.first) {
+        g.strokeStyle = c.faint; g.lineWidth = 1.5;
+        g.beginPath(); g.arc(x, y, r - 1, 0, Math.PI * 2); g.stroke();
+      } else if (sc.skipped[i]) {
+        const k = r * 0.75;
+        g.strokeStyle = 'rgba(200,205,215,0.55)'; g.lineWidth = 2.25;
+        g.beginPath(); g.moveTo(x - k, y - k); g.lineTo(x + k, y + k); g.moveTo(x + k, y - k); g.lineTo(x - k, y + k); g.stroke();
+      } else if (j === -1) {
+        g.fillStyle = n.downbeat ? '#ffffff' : '#d9dde6';
+        g.beginPath(); g.arc(x, y, r, 0, Math.PI * 2); g.fill();
+      } else {
+        g.fillStyle = alpha(c.judge[j], 0.35);
+        g.strokeStyle = c.judge[j]; g.lineWidth = 2;
+        g.beginPath(); g.arc(x, y, r, 0, Math.PI * 2); g.fill(); g.stroke();
+      }
+    }
+
     // grid notes: where strokes may land (on any drum)
-    for (let i = lowerBound(s.notes, t0); i < s.notes.length && s.notes[i].t <= t1; i++) {
+    for (let i = s.chart ? s.notes.length : lowerBound(s.notes, t0); i < s.notes.length && s.notes[i].t <= t1; i++) {
       const n = s.notes[i], x = toX(n.t), j = sc.judge[i];
       const r = n.downbeat ? 7 : n.onBeat ? 6 : n.primary === false ? 3 : 4.5; // hybrid: secondary notes are small
       if (!n.onBeat) { // faint guide through the lanes for subdivisions
@@ -203,7 +226,7 @@ export class Timeline extends CanvasView {
       g.setLineDash([]);
       g.beginPath(); g.moveTo(gx, y - 6); g.lineTo(gx, y + 6); g.stroke(); // target tick
     };
-    const r = Math.min(7, laneH * 0.3);
+    const r = Math.min(7, laneH * 0.3) * (s.chart ? 0.6 : 1); // in charts, strokes sit on the notes
     for (let k = sc.hits.length - 1; k >= 0; k--) {
       const hit = sc.hits[k];
       if (hit.t < t0) break;
@@ -249,7 +272,7 @@ export class Timeline extends CanvasView {
       g.fillText(text, 9, y + 0.5);
     };
     s.lanes.forEach((name, l) => label(name.toUpperCase(), laneY(l), c.muted));
-    label('GRID', gridY, c.faint);
+    label(s.chart ? 'BEATS' : 'GRID', gridY, c.faint);
     g.textBaseline = 'alphabetic';
   }
 }

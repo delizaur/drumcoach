@@ -252,6 +252,41 @@ export class Scorer {
     };
   }
 
+  /** The per-note results and running totals, for replay files (see restore). */
+  snapshot() {
+    return {
+      judge: [...this.judge], skipped: this.chart ? [...this.skipped] : null,
+      counts: [...this.counts], streak: this.streak, maxStreak: this.maxStreak,
+      sum: this.sum, sumSq: this.sumSq, weight: this.weight,
+    };
+  }
+
+  /**
+   * A scorer in the state a replay file describes: a snapshot, plus the strokes with the outcome each
+   * one had ({ t, r: 'hit'|'miss'|'extra'|…, j, err, i, wrong, pad, lane }). Nothing is scored again,
+   * so a replay's results stay as they were, even if the scoring changes later.
+   */
+  static restore(notes, opts, snap, strokes) {
+    const sc = new Scorer(notes, opts);
+    sc.judge.set(snap.judge);
+    if (sc.chart && snap.skipped) {
+      sc.skipped.set(snap.skipped);
+      sc.nSkipped = snap.skipped.reduce((a, v) => a + v, 0);
+      sc.skipCursor = notes.length;
+    }
+    sc.counts = [...snap.counts];
+    Object.assign(sc, { streak: snap.streak, maxStreak: snap.maxStreak, sum: snap.sum, sumSq: snap.sumSq, weight: snap.weight });
+    for (const x of strokes) {
+      if (x.r === 'extra') sc.extras.push({ t: x.t, pad: x.pad, lane: x.lane });
+      if (x.r !== 'hit' && x.r !== 'miss') continue;
+      const n = notes[x.i];
+      const hit = { t: x.t, err: x.err, j: x.j, i: x.i, slot: n.slot, sec: n.sec, pad: x.pad, lane: x.lane, zones: { early: sc.windowsAt(x.i, -1), late: sc.windowsAt(x.i, 1) } };
+      if (x.wrong) hit.wrong = true;
+      (x.r === 'hit' ? sc.hits : sc.misses).push(hit);
+    }
+    return sc;
+  }
+
   recentMean(k = 16) {
     const h = this.hits.slice(-k);
     return h.length ? h.reduce((a, x) => a + x.err, 0) / h.length : 0;

@@ -216,6 +216,8 @@
     <section class="practice">
       <div class="transport panel">
         <button id="startBtn" class="btn primary big">Start</button>
+        <button id="importReplayBtn" class="btn" type="button" title="Open a replay file to see its results and watch it">Import replay</button>
+        <input type="file" id="replayInput" hidden accept=".json,.zip,application/json,application/zip">
         <div class="now">
           <div class="now-bpm"><span id="bpmNow">—</span><small>BPM</small></div>
           <div class="now-pos" id="posNow">Ready</div>
@@ -417,8 +419,14 @@
       <header class="dialog-head"><h2 id="resultsTitle">Results</h2><button class="btn icon" id="resultsClose" aria-label="Close">✕</button></header>
       <div id="resultsBody"></div>
       <div class="dialog-actions">
+        <div class="export-actions">
+          <button class="btn" id="exportReplay" title="Save this session's results and every stroke to a file. Opening it needs the song in your library.">Export replay</button>
+          <button class="btn" id="exportReplaySong" title="The replay plus the song's files, so it opens anywhere: the song is added to the library if it's missing.">Export replay + song</button>
+          <span class="hint" id="exportStatus"></span>
+        </div>
         <button class="btn" id="resultsOffset" hidden></button>
         <button class="btn primary" id="resultsAgain">Play again</button>
+        <button class="btn primary" id="playReplay" hidden>Play replay</button>
       </div>
     </div>
   </dialog>

@@ -1,5 +1,5 @@
-// Minimal ZIP reader (stored + deflate entries) for .osz files.
-// Uses the browser's native DecompressionStream, so no library is needed.
+// Minimal ZIP reader (stored + deflate entries) for .osz files, and writer (stored entries) for
+// replays bundled with their song. Uses the browser's native DecompressionStream, so no library is needed.
 
 const SIG_EOCD = 0x06054b50;
 const SIG_CENTRAL = 0x02014b50;
@@ -56,4 +56,68 @@ export async function readZip(blob) {
     });
   }
   return entries;
+}
+
+const CRC_TABLE = (() => {
+  const t = new Uint32Array(256);
+  for (let n = 0; n < 256; n++) {
+    let c = n;
+    for (let k = 0; k < 8; k++) c = c & 1 ? 0xedb88320 ^ (c >>> 1) : c >>> 1;
+    t[n] = c >>> 0;
+  }
+  return t;
+})();
+
+function crc32(bytes) {
+  let c = 0xffffffff;
+  for (let i = 0; i < bytes.length; i++) c = CRC_TABLE[(c ^ bytes[i]) & 0xff] ^ (c >>> 8);
+  return (c ^ 0xffffffff) >>> 0;
+}
+
+/**
+ * Packs files into a ZIP without compression (songs are already compressed audio).
+ * @param {Array<{path: string, data: Uint8Array}>} files
+ * @returns {Blob}
+ */
+export function writeZip(files) {
+  const enc = new TextEncoder(), parts = [], central = [];
+  const now = new Date();
+  const time = (now.getHours() << 11) | (now.getMinutes() << 5) | (now.getSeconds() >> 1);
+  const date = ((now.getFullYear() - 1980) << 9) | ((now.getMonth() + 1) << 5) | now.getDate();
+  let offset = 0, centralSize = 0;
+  for (const { path, data } of files) {
+    const name = enc.encode(path), crc = crc32(data);
+    // the fields local and central headers share, from "version needed" on
+    const common = (v, p) => {
+      v.setUint16(p, 20, true);          // version needed
+      v.setUint16(p + 2, 0x0800, true);  // flags: UTF-8 names
+      v.setUint16(p + 4, 0, true);       // stored
+      v.setUint16(p + 6, time, true);
+      v.setUint16(p + 8, date, true);
+      v.setUint32(p + 10, crc, true);
+      v.setUint32(p + 14, data.length, true);
+      v.setUint32(p + 18, data.length, true);
+      v.setUint16(p + 22, name.length, true);
+    };
+    const local = new DataView(new ArrayBuffer(30));
+    local.setUint32(0, SIG_LOCAL, true);
+    common(local, 4);
+    parts.push(local, name, data);
+
+    const c = new DataView(new ArrayBuffer(46));
+    c.setUint32(0, SIG_CENTRAL, true);
+    c.setUint16(4, 20, true); // version made by
+    common(c, 6);
+    c.setUint32(42, offset, true);
+    central.push(c, name);
+    offset += 30 + name.length + data.length;
+    centralSize += 46 + name.length;
+  }
+  const end = new DataView(new ArrayBuffer(22));
+  end.setUint32(0, SIG_EOCD, true);
+  end.setUint16(8, files.length, true);
+  end.setUint16(10, files.length, true);
+  end.setUint32(12, centralSize, true);
+  end.setUint32(16, offset, true);
+  return new Blob([...parts, ...central, end], { type: 'application/zip' });
 }

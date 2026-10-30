@@ -15,6 +15,7 @@ import { Timeline, ErrorMeter, Scatter, Histogram, drawCalibStrip } from './rend
 import { Calibration } from './calibration.js';
 import { DrumKit } from './drums.js';
 import { library } from './library.js';
+import { REPLAY_FORMAT, REPLAY_VERSION, encodeReplay, replayFileName, bundleReplay, readReplayFile, download } from './replay.js';
 import { lowerBound, clamp, fmtTime, fmtMs, escapeHtml, basename } from './util.js';
 
 const $ = id => document.getElementById(id);
@@ -77,6 +78,7 @@ function songPrefs() {
 const audio = new AudioEngine(settings.audioBuffer);
 let song = null;      // { key, diffs, diff, diffIndex, buffer, backing, stems, audioName, durationMs, bgName, bgUrl }
 let session = null;
+let replay = null;    // the replay being watched: a session restored from a replay file (see replaySession)
 let calib = null;
 let schedulerTimer = 0;
 const recent = [];    // recent hits for the error meter: { err, j, at }
@@ -128,7 +130,7 @@ function onMidiNote(ev) {
 
   // muted pads still sound (above), they just aren't scored
   if (ev.velocity < settings.minVelocity || settings.mutedNotes.includes(ev.note)) return;
-  stroke(ev.time, ev.note);
+  stroke(ev.time, ev.note, ev.velocity);
 }
 
 let kit = null;
@@ -142,6 +144,7 @@ function playPad(note, velocity, { keyboard = false } = {}) {
 // Chart note sounds: their own kit, so their volume is separate from the pads'. One voice per lane.
 const LANE_VOICES = [51, 42, 47, 38, 36]; // ride, closed hi-hat, mid tom, snare, kick
 let chartKit = null;
+let replayKit = null; // a replay's strokes
 
 /** The chart's notes as drum sounds to schedule, or none when they're muted. */
 function noteSounds(notes, from) {
@@ -161,6 +164,7 @@ function isTyping(el) {
     || (el.tagName === 'INPUT' && !['range', 'checkbox', 'radio', 'button'].includes(el.type)));
 }
 window.addEventListener('keydown', e => {
+  if (e.key === 'Escape' && replay) { e.preventDefault(); closeReplay(); return; }
   if (e.key === 'Escape' && session) { e.preventDefault(); stopSession(true); return; }
   if (!settings.keyboard || e.ctrlKey || e.metaKey || e.altKey || isTyping(e.target)) return;
   const note = HIT_KEYS[e.key.toLowerCase()];
@@ -168,20 +172,27 @@ window.addEventListener('keydown', e => {
   e.preventDefault();
   if (e.repeat) return;
   playPad(note, 100, { keyboard: true });
-  stroke(e.timeStamp || performance.now(), note);
+  stroke(e.timeStamp || performance.now(), note, 100);
 });
 window.addEventListener('keyup', e => {
   if (e.key === ' ' && (session || calib?.active) && !isTyping(e.target)) e.preventDefault();
 });
 
 /** A single drum stroke on a MIDI note at a performance.now()-domain time. */
-function stroke(perfTime, note) {
+function stroke(perfTime, note, velocity) {
   if (!audio.ctx) return;
   const songT = audio.songTimeAtCtx(audio.perfToCtx(perfTime));
   if (calib?.active) { calib.hit(songT); return; }
-  if (!session) return;
+  if (!session || session.playback) return; // a replay plays its own strokes
   const { pad, lane } = padOf(note);
-  const res = session.scorer.hit(songT - settings.latency * session.rate, pad, lane);
+  const t = songT - settings.latency * session.rate;
+  const res = session.scorer.hit(t, pad, lane);
+  session.strokes.push(strokeRecord(t, note, velocity, res));
+  showStroke(res);
+}
+
+/** Feedback for a scored stroke: the error meter, the judgment flash and the timing chart. */
+function showStroke(res) {
   if (!res) return;
   if (res.type === 'hit' || res.type === 'miss') {
     recent.push({ err: res.hit.err, j: res.hit.j, at: performance.now(), zones: res.hit.zones });
@@ -189,6 +200,17 @@ function stroke(perfTime, note) {
     showFeedback(res.hit.j, res.hit.err, res.hit.wrong);
   }
   if (res.type !== 'double') session.scatterDirty = true;
+}
+
+/** A stroke as replay files keep it: when, which note, and what it scored ('ignored' = not scored). */
+const round3 = v => Math.round(v * 1000) / 1000;
+function strokeRecord(t, note, vel, res) {
+  const rec = { t: round3(t), note, vel, r: res?.type || 'ignored' };
+  if (res?.hit) {
+    Object.assign(rec, { j: res.hit.j, err: round3(res.hit.err), i: res.hit.i });
+    if (res.hit.wrong) rec.wrong = true;
+  }
+  return rec;
 }
 
 // ================================================================ session
@@ -235,8 +257,11 @@ function lockSetup(locked, keep = null) {
   setup.classList.toggle('locked', locked);
 }
 
+/** Silent bars of the metronome's gap trainer: `play` bars with the click, then `mute` without. */
+const gapBars = g => (g ? bar => bar >= g.countIn && (bar - g.countIn) % (g.play + g.mute) >= g.play : null);
+
 async function startSession({ preview = false, from = null } = {}) {
-  if (session) return;
+  if (session || replay) return;
   if (settings.mode === 'song' && !song?.diff) return;
   await audio.init();
   audio.setMusicVolume(settings.musicVolume);
@@ -245,7 +270,7 @@ async function startSession({ preview = false, from = null } = {}) {
   const pattern = currentPattern();
   const windows = STRICTNESS[settings.strictness] || STRICTNESS.normal;
   let sections, startPos = 0, rate = 1, scoreFrom, endMs = Infinity, buffer = null, hiddenBar = null, triplets = [];
-  let sextuplets = [];
+  let sextuplets = [], gap = null;
   let clickMode = settings.clickMode;
 
   if (settings.mode === 'song') {
@@ -273,8 +298,8 @@ async function startSession({ preview = false, from = null } = {}) {
     sections = metronomeSections({ bpm, meter, countIn, trainer });
     scoreFrom = Math.max(countIn * meter, 1) * (60000 / bpm) - 1;
     if (settings.gapOn) {
-      const { gapPlay: play, gapMute: mute } = settings;
-      hiddenBar = bar => bar >= countIn && (bar - countIn) % (play + mute) >= play;
+      gap = { countIn, play: settings.gapPlay, mute: settings.gapMute };
+      hiddenBar = gapBars(gap);
     }
   }
 
@@ -289,12 +314,19 @@ async function startSession({ preview = false, from = null } = {}) {
       ? `${song.diff.artist} – ${song.diff.title} [${play ? play.name : song.diff.format === 'ch' ? 'Free play' : song.diff.version}]`
       : `Metronome · ${settings.bpm} BPM${settings.trainerOn ? ' (speed trainer)' : ''}`,
     chart: !!play,
-    pattern, windows, sections, rate, startPos, endMs, scoreFrom, hiddenBar,
+    pattern, windows, sections, rate, startPos, endMs, scoreFrom, hiddenBar, gap, clickMode,
+    countIn: settings.mode === 'song' ? 0 : settings.countIn,
     lanes: LANES,
     tripletSections: mergeBeats(triplets),
     notes: grid.notes,
     beats: grid.beats,
     scorer: new Scorer(grid.notes, { windows, rate, scoreFrom }),
+    strokes: [], // every stroke, for the replay (see strokeRecord)
+    startedAt: Date.now(),
+    song: settings.mode === 'song' ? {
+      key: song.key, title: song.diff.title, artist: song.diff.artist, creator: song.diff.creator,
+      version: song.diff.version, play: play ? play.name : 'Free play', drumStem: settings.drumStem,
+    } : null,
     clicks: buildClicks(grid, clickMode, hiddenBar, startPos),
     clickCursor: 0,
     noteSounds: play ? noteSounds(grid.notes, startPos) : [],
@@ -308,6 +340,7 @@ async function startSession({ preview = false, from = null } = {}) {
   if (session.noteSounds.length) {
     chartKit ||= new DrumKit(audio.ctx);
     chartKit.volume = settings.chartVolume;
+    session.kit = chartKit;
   }
 
   audio.start({ buffer, startPos, rate, leadIn: 0.15 });
@@ -315,14 +348,23 @@ async function startSession({ preview = false, from = null } = {}) {
   scheduleClicks();
   schedulerTimer = setInterval(scheduleClicks, 20);
 
-  $('startBtn').textContent = 'Stop';
-  $('startBtn').classList.replace('primary', 'stop');
-  $('playMode').disabled = true;
-  $('idleHint').hidden = true;
+  renderTransport();
   lockSetup(true, preview ? $('tempoBox') : null);
 }
 
-/** Schedules the clicks and chart note sounds of the next 150 ms of song. */
+/** The Start button and what goes with it: a session or a replay can be stopped, nothing else started. */
+function renderTransport() {
+  const busy = !!(session || replay), btn = $('startBtn');
+  btn.textContent = replay ? 'Stop replay' : session ? 'Stop' : 'Start';
+  btn.classList.toggle('primary', !busy);
+  btn.classList.toggle('stop', busy);
+  $('importReplayBtn').disabled = busy;
+  $('playMode').disabled = busy || !!song?.generating;
+  $('idleHint').hidden = busy;
+  updateStartButton();
+}
+
+/** Schedules the clicks and chart note sounds (or a replay's strokes) of the next 150 ms of song. */
 function scheduleClicks() {
   const s = session;
   if (!s || (s.clickCursor >= s.clicks.length && s.noteCursor >= s.noteSounds.length)) return;
@@ -336,7 +378,7 @@ function scheduleClicks() {
   while (s.noteCursor < s.noteSounds.length && s.noteSounds[s.noteCursor].t <= horizon) {
     const ev = s.noteSounds[s.noteCursor++];
     const when = audio.ctxAtSongTime(ev.t);
-    if (when >= ctxNow) chartKit.play(ev.note, 100, when);
+    if (when >= ctxNow) s.kit.play(ev.note, ev.vel ?? 100, when);
   }
 }
 
@@ -348,17 +390,19 @@ function stopSession(withResults) {
   const d = audio.dropoutStats();
   s.dropouts = { events: d.events - s.dropoutsAtStart.events, ms: d.ms - s.dropoutsAtStart.ms };
   audio.stop();
-  s.scorer.advance(s.now);
+  if (s.playback) {
+    s.scorer.advance(Math.min(s.now, s.endedAt));
+    if (replay) replay.pos = clamp(s.now, 0, s.endMs);
+  } else {
+    s.scorer.advance(s.now);
+    s.endedAt = s.now;
+  }
 
-  $('startBtn').textContent = 'Start';
-  $('playMode').disabled = false;
-  $('startBtn').classList.replace('stop', 'primary');
-  $('idleHint').hidden = false;
-  lockSetup(false);
-  updateStartButton();
+  renderTransport();
+  lockSetup(!!replay); // a replay keeps the setup locked until it's closed
 
   drawScatter(s, true);
-  if (withResults && !s.preview && s.scorer.stats().judged >= 4) showResults(s);
+  if (withResults && !s.preview && !s.playback && s.scorer.stats().judged >= 4) showResults(s);
 }
 
 // ================================================================ frame loop
@@ -373,11 +417,12 @@ function frame() {
   if (s) {
     const now = audio.audibleSongTime();
     s.now = now;
-    s.scorer.advance(now);
+    if (s.playback) playStrokes(s, now);
+    s.scorer.advance(s.playback ? Math.min(now, s.endedAt) : now); // a replay's notes after its end weren't skipped
     timeline.draw(s);
     if (perfNow - s.lastUi > 100) { s.lastUi = perfNow; updateLive(s); }
     if (s.scatterDirty && perfNow - s.lastScatter > 250) drawScatter(s);
-    if (s.mode === 'song' && now > s.endMs + 400) stopSession(true);
+    if (s.playback ? now > s.endedAt + 400 : s.mode === 'song' && now > s.endMs + 400) stopSession(true);
   }
   updatePlayhead();
 
@@ -395,8 +440,8 @@ function frame() {
 requestAnimationFrame(frame);
 
 function scatterRange(s) {
-  // songs: the whole song, so the playhead shows the position; metronome: the session so far
-  if (s.mode === 'song') return { x0: 0, x1: s.endMs };
+  // songs and replays: the whole thing, so the playhead shows the position; metronome: the session so far
+  if (s.mode === 'song' || s.playback) return { x0: 0, x1: s.endMs };
   const x0 = s.scoreFrom;
   return { x0, x1: Math.max(s.now, x0 + 30000) };
 }
@@ -404,14 +449,15 @@ function scatterRange(s) {
 function drawScatter(s, final = false) {
   s.scatterDirty = false;
   s.lastScatter = performance.now();
-  const range = scatterRange(s), x0 = range.x0;
-  const x1 = final && s.mode !== 'song' ? Math.max(x0 + 1000, s.now) : range.x1;
+  const range = scatterRange(s), x0 = range.x0, whole = s.mode === 'song' || s.playback;
+  const x1 = final && !whole ? Math.max(x0 + 1000, s.now) : range.x1;
+  const sc = s.recorded || s.scorer; // a replay shows all its strokes from the start
   scatter.draw({
-    hits: s.scorer.hits, misses: s.scorer.misses, notes: s.notes, windows: s.windows,
-    good: s.scorer.typicalGood(x0, s.mode === 'song' ? x1 : s.now), x0, x1,
+    hits: sc.hits, misses: sc.misses, notes: s.notes, windows: s.windows,
+    good: sc.typicalGood(x0, whole ? x1 : s.now), x0, x1,
     sectionStarts: tempoChanges(s.sections),
     tripletSections: s.tripletSections,
-    timeAxis: s.mode === 'song',
+    timeAxis: whole,
   });
 }
 
@@ -526,7 +572,7 @@ function chartGridNotes(sections, play) {
 
 /** Empty chart spanning the loaded song, so the playhead and seeking work before playing. */
 function drawSongChart() {
-  if (session || settings.mode !== 'song' || !song?.diff) return;
+  if (session || replay || settings.mode !== 'song' || !song?.diff) return;
   const windows = STRICTNESS[settings.strictness] || STRICTNESS.normal;
   // scaled like the session's chart will be, from the grid it will use
   const { sections, triplets, sextuplets } = songTiming();
@@ -545,8 +591,12 @@ function drawSongChart() {
 
 // ---- playhead and seeking on the timing chart
 
-/** Seeking is allowed while stopped, during a preview, and in a session before the first stroke. */
+/**
+ * Seeking is allowed while stopped, during a preview, and in a session before the first stroke.
+ * Replays can always seek.
+ */
 function canSeek() {
+  if (replay) return true;
   if (settings.mode !== 'song' || !song?.diff) return false;
   if (!session) return true;
   if (session.mode !== 'song') return false;
@@ -558,22 +608,30 @@ let chartState = null;
 function updatePlayhead() {
   const ph = $('playhead');
   let t = null;
-  if (session?.mode === 'song') t = session.now;
+  if (session?.mode === 'song' || session?.playback) t = session.now;
+  else if (replay) t = replay.pos;
   else if (!session && settings.mode === 'song' && song?.diff && scatter.last?.timeAxis) t = songPrefs().startAt;
   ph.hidden = t == null;
-  if (t != null) ph.style.left = `${scatter.xFor(clamp(t, 0, song?.durationMs ?? t))}px`;
-  const seekable = canSeek(), state = `${seekable}|${!!session}`;
+  if (t != null) ph.style.left = `${scatter.xFor(clamp(t, 0, replay ? replay.endMs : song?.durationMs ?? t))}px`;
+  const seekable = canSeek(), state = `${seekable}|${!!session}|${!!replay}`;
   if (state !== chartState) {
     chartState = state;
     $('chartPlot').classList.toggle('seekable', seekable);
-    $('chartHint').textContent = seekable
-      ? (session ? 'click or drag to jump (until you play your first note)' : 'click or drag to choose where to start')
+    $('chartHint').textContent = replay ? 'replay: click or drag to jump'
+      : seekable ? (session ? 'click or drag to jump (until you play your first note)' : 'click or drag to choose where to start')
       : 'each dot is a hit, the line is the moving average';
     if (!seekable) $('seekGhost').hidden = true;
   }
 }
 
 function seekTo(ms) {
+  if (replay) {
+    ms = clamp(Math.round(ms / 100) * 100, 0, Math.max(0, replay.endedAt - 1000));
+    if (session) stopSession(false);
+    resetLive();
+    startReplay(ms);
+    return;
+  }
   ms = clamp(Math.round(ms / 100) * 100, 0, Math.max(0, Math.floor((song.durationMs - 3000) / 100) * 100));
   if (session) {
     const preview = session.preview;
@@ -636,15 +694,17 @@ function updateLive(s) {
   const now = s.now;
   const sec = s.sections[sectionAt(s.sections, now)];
   $('bpmNow').textContent = +((60000 / sec.beatLength) * s.rate).toFixed(1);
+  let pos;
   if (s.mode === 'song') {
-    $('posNow').textContent = `${fmtTime(now)} / ${fmtTime(s.endMs)}`;
+    pos = `${fmtTime(now)} / ${fmtTime(s.endMs)}`;
   } else {
     const bi = lowerBound(s.beats, now + 1) - 1;
     const b = s.beats[Math.max(0, bi)];
-    if (now < 0) $('posNow').textContent = 'Get ready…';
-    else if (b.bar < settings.countIn) $('posNow').textContent = `Count-in · ${b.beatInBar + 1}`;
-    else $('posNow').textContent = `Bar ${b.bar + 1 - settings.countIn} · beat ${b.beatInBar + 1}${s.hiddenBar?.(b.bar) ? ' · silent' : ''}`;
+    if (now < 0) pos = 'Get ready…';
+    else if (b.bar < s.countIn) pos = `Count-in · ${b.beatInBar + 1}`;
+    else pos = `Bar ${b.bar + 1 - s.countIn} · beat ${b.beatInBar + 1}${s.hiddenBar?.(b.bar) ? ' · silent' : ''}`;
   }
+  $('posNow').textContent = s.playback ? `Replay · ${pos}` : pos;
 }
 
 function renderCounts(st) {
@@ -659,7 +719,7 @@ function resetLive() {
   for (const id of ['tAccSub', 'tMeanSub', 'tSdSub']) $(id).textContent = ' ';
   $('tStreak').textContent = '0';
   $('tStreakSub').textContent = 'best 0';
-  renderCounts({ counts: [0, 0, 0, 0], chart: !!chartPlay() });
+  renderCounts({ counts: [0, 0, 0, 0], chart: replay ? replay.chart : !!chartPlay() });
 }
 
 const JUDGE_COLOR = ['var(--perfect)', 'var(--great)', 'var(--good)', 'var(--miss)'];
@@ -748,8 +808,12 @@ function showResults(s) {
     .sort((a, b) => a.key - b.key)
     .map(r => ({ ...r, label: `${r.key} BPM` }));
 
+  resultsSession = s;
   $('resultsTitle').textContent = s.title;
   const acc = st.accuracy == null ? '—' : `${(st.accuracy * 100).toFixed(1)}%`;
+  const when = new Date(s.startedAt).toLocaleString(undefined, { dateStyle: 'medium', timeStyle: 'short' });
+  const replayNote = s.replay ? `<p class="res-meta">Replay of a session played on ${escapeHtml(when)}.${s.songMissing
+    ? ` <span class="warn">Its song isn't in your library, so it can't be played back. Add the song, or ask for a replay + song export.</span>` : ''}</p>` : '';
   const dropoutNote = s.dropouts?.events > 0 ? `
     <div class="dropout-warn">
       <b>${s.dropouts.events} audio dropout${s.dropouts.events > 1 ? 's' : ''}</b> during this session (${Math.round(s.dropouts.ms)} ms of missing audio).
@@ -757,7 +821,7 @@ function showResults(s) {
       Try a larger <b>audio buffer</b> in Settings, then run the calibration again.
       <button class="btn small" type="button" id="dropoutSettings">Open settings</button>
     </div>` : '';
-  $('resultsBody').innerHTML = dropoutNote + `
+  $('resultsBody').innerHTML = replayNote + dropoutNote + `
     <div class="res-tiles">
       <div class="tile"><div class="tile-label">Accuracy</div><div class="tile-value">${acc}</div><div class="tile-sub">${st.counts[0]} perfect · ${st.counts[1]} great · ${st.counts[2]} good</div></div>
       <div class="tile"><div class="tile-label">Average offset</div><div class="tile-value">${st.nHits ? fmtMs(st.mean, 1) : '—'}</div><div class="tile-sub">${st.nHits ? tendency(st.mean) : ''}</div></div>
@@ -779,7 +843,12 @@ function showResults(s) {
 
   const offBtn = $('resultsOffset');
   const suggest = Math.round(st.mean);
-  offBtn.hidden = !(s.mode === 'song' && st.nHits >= 20 && Math.abs(suggest) >= 3);
+  offBtn.hidden = !!s.replay || !(s.mode === 'song' && st.nHits >= 20 && Math.abs(suggest) >= 3);
+  $('resultsAgain').hidden = !!s.replay;
+  $('playReplay').hidden = !s.replay;
+  $('playReplay').disabled = !!s.songMissing;
+  $('exportReplaySong').hidden = s.mode !== 'song';
+  $('exportStatus').textContent = '';
   if (!offBtn.hidden) {
     const next = songPrefs().offset + suggest;
     offBtn.textContent = `Shift this song's beats by ${fmtMs(suggest)}`;
@@ -811,6 +880,204 @@ function showResults(s) {
 
 $('resultsClose').onclick = () => $('resultsDialog').close();
 $('resultsAgain').onclick = () => { $('resultsDialog').close(); resetLive(); startSession(); };
+
+// ================================================================ replays
+
+let resultsSession = null; // the session (or replay) on the results screen
+
+/** A finished session as a replay file (see replay.js). */
+function replayData(s) {
+  const st = s.scorer.stats();
+  // only the part that was played is kept (metronome grids run for an hour); the indices stay valid
+  const end = Math.min(s.endMs, s.endedAt) + 5000, played = list => list.filter(x => x.t <= end);
+  const notes = played(s.notes), snap = s.scorer.snapshot();
+  snap.judge.length = notes.length;
+  if (snap.skipped) snap.skipped.length = notes.length;
+  return {
+    format: REPLAY_FORMAT, version: REPLAY_VERSION, app: 'DrumCoach',
+    playedAt: new Date(s.startedAt).toISOString(),
+    title: s.title, mode: s.mode, song: s.song,
+    // what the results screen shows, readable without the app
+    summary: {
+      accuracy: st.accuracy, meanMs: st.mean, sdMs: st.sd, ur: st.ur,
+      perfect: st.counts[0], great: st.counts[1], good: st.counts[2], miss: st.counts[MISS],
+      skipped: st.chart ? st.skipped : undefined, played: st.nHits, judged: st.judged, doubled: st.extra, bestStreak: st.maxStreak,
+      dropouts: s.dropouts,
+    },
+    settings: {
+      strictness: settings.strictness, latencyMs: settings.latency, rate: s.rate, pattern: s.chart ? null : s.pattern.name,
+      ...(s.mode === 'song' ? { syncMs: totalSync() } : { bpm: settings.bpm, meter: settings.meter, trainer: settings.trainerOn }),
+    },
+    // what's needed to show the results and play the replay back
+    session: {
+      chart: s.chart, pattern: s.pattern, windows: s.windows, rate: s.rate, startPos: s.startPos, endMs: s.endMs,
+      scoreFrom: s.scoreFrom, endedAt: s.endedAt, countIn: s.countIn, clickMode: s.clickMode, gap: s.gap,
+      dropouts: s.dropouts, tripletSections: s.tripletSections, sections: s.sections,
+      beats: played(s.beats), notes,
+    },
+    scorer: snap,
+    strokes: s.strokes,
+  };
+}
+
+/** A replay file as a finished session, for the results screen and for playing it back. */
+function replaySession(data) {
+  const x = data.session;
+  const opts = { windows: x.windows, rate: x.rate, scoreFrom: x.scoreFrom };
+  const strokes = data.strokes.map(r => ({ ...r, ...padOf(r.note) }));
+  return {
+    replay: data, songKey: data.song?.key ?? null,
+    mode: data.mode, title: data.title, chart: x.chart, startedAt: Date.parse(data.playedAt),
+    pattern: x.pattern, windows: x.windows, sections: x.sections, rate: x.rate, startPos: x.startPos, scoreFrom: x.scoreFrom,
+    endMs: data.mode === 'song' ? x.endMs : x.endedAt, endedAt: x.endedAt, now: x.endedAt,
+    countIn: x.countIn, clickMode: x.clickMode, gap: x.gap, hiddenBar: gapBars(x.gap), dropouts: x.dropouts,
+    lanes: LANES, tripletSections: x.tripletSections, notes: x.notes, beats: x.beats,
+    scorer: Scorer.restore(x.notes, opts, data.scorer, strokes),
+    strokes: data.strokes,
+  };
+}
+
+async function exportReplay(withSong) {
+  const s = resultsSession, status = $('exportStatus');
+  if (!s) return;
+  const data = s.replay || (s.replayData ||= replayData(s));
+  try {
+    if (!withSong) {
+      download(new Blob([encodeReplay(data)], { type: 'application/json' }), replayFileName(data, 'json'));
+      return;
+    }
+    const rec = await library.get(s.songKey ?? data.song.key);
+    if (!rec) throw new Error("This song isn't in your library anymore. Add it again to export it with the replay.");
+    status.textContent = 'Packing the song…';
+    download(await bundleReplay(data, asItems(rec.files)), replayFileName(data, 'zip'));
+    status.textContent = '';
+  } catch (err) {
+    console.error(err);
+    status.textContent = `Couldn't export the replay: ${err?.message || err}`;
+  }
+}
+$('exportReplay').onclick = () => exportReplay(false);
+$('exportReplaySong').onclick = () => exportReplay(true);
+
+/** Opens a replay file (bundled with its song or not) on the results screen. */
+async function importReplay(file) {
+  const btn = $('importReplayBtn');
+  btn.disabled = true;
+  btn.textContent = 'Opening…';
+  try {
+    const { data, songItems } = await readReplayFile(file);
+    const s = replaySession(data);
+    if (data.mode === 'song') {
+      // a bundled song joins the library, unless it's there already
+      if (songItems && !(await library.get(s.songKey))) {
+        const { diffs, keep } = await readSongSet(songItems);
+        const rec = libraryRecord(diffs, keep);
+        await library.put(rec);
+        s.songKey = rec.id;
+        renderLibrary();
+      }
+      s.songMissing = !(await library.get(s.songKey));
+    }
+    // the timing chart shows every stroke of the replay right away, over the whole replay
+    if (!session) drawScatter({ ...s, playback: true, recorded: s.scorer });
+    showResults(s);
+  } catch (err) {
+    console.error(err);
+    alert(`Couldn't open the replay: ${err?.message || err}`);
+  } finally {
+    btn.textContent = 'Import replay';
+    renderTransport();
+  }
+}
+$('importReplayBtn').onclick = () => $('replayInput').click();
+$('replayInput').onchange = e => {
+  const file = e.target.files[0];
+  e.target.value = '';
+  if (file) importReplay(file);
+};
+
+/** Watches the replay on the results screen: its song (or metronome) with its strokes as drum sounds. */
+async function playReplay() {
+  const s = resultsSession;
+  if (!s?.replay || session) return;
+  $('resultsDialog').close();
+  if (s.mode === 'song') {
+    if (song?.key !== s.songKey) {
+      const rec = await library.get(s.songKey);
+      if (!rec) { alert("This replay's song isn't in your library."); return; }
+      if (settings.mode !== 'song') setMode('song');
+      await loadSong(rec.files, { fromLibrary: true });
+      if (song?.key !== s.songKey) return; // couldn't load it; loadSong shows why
+    }
+    if (settings.mode !== 'song') setMode('song');
+  } else if (settings.mode !== 'metronome') {
+    setMode('metronome');
+  }
+  replay = s;
+  replay.pos = s.startPos;
+  lockSetup(true);
+  resetLive();
+  renderTransport();
+  renderPlayMode();
+  startReplay(s.startPos);
+}
+$('playReplay').onclick = playReplay;
+
+/** Plays the replay from song time `from`. The strokes before it count as played already. */
+async function startReplay(from) {
+  const r = replay;
+  if (!r || session) return;
+  await audio.init();
+  if (replay !== r || session) return;
+  audio.setMusicVolume(settings.musicVolume);
+  audio.setClickVolume(settings.clickVolume);
+
+  // the strokes are scored again as they play, so the live counts, timeline and chart fill in as they did
+  const scorer = new Scorer(r.notes, { windows: r.windows, rate: r.rate, scoreFrom: r.scoreFrom });
+  let cursor = 0;
+  for (; cursor < r.strokes.length && r.strokes[cursor].t < from; cursor++) replayStroke(scorer, r.strokes[cursor]);
+  scorer.advance(from);
+  replayKit ||= new DrumKit(audio.ctx);
+  replayKit.volume = settings.padVolume;
+  session = {
+    ...r, playback: true, preview: false, startPos: from, now: from, scorer, recorded: r.scorer, strokeCursor: cursor,
+    clicks: buildClicks(r, r.clickMode, r.hiddenBar, from), clickCursor: 0,
+    noteSounds: r.strokes.slice(cursor).map(x => ({ t: x.t, note: x.note, vel: x.vel })).sort((a, b) => a.t - b.t),
+    noteCursor: 0, kit: replayKit,
+    lastUi: 0, lastScatter: 0, scatterDirty: true,
+  };
+  recent.length = 0;
+  audio.start({ buffer: r.mode === 'song' ? musicBuffer(r.replay.song?.drumStem ?? true) : null, startPos: from, rate: r.rate, leadIn: 0.15 });
+  session.dropoutsAtStart = audio.dropoutStats();
+  scheduleClicks();
+  schedulerTimer = setInterval(scheduleClicks, 20);
+  renderTransport();
+}
+
+const replayStroke = (scorer, x) => {
+  scorer.advance(x.t);
+  const { pad, lane } = padOf(x.note);
+  return scorer.hit(x.t, pad, lane);
+};
+
+/** Plays a replay's strokes up to song time `now`, as if they were coming in. */
+function playStrokes(s, now) {
+  while (s.strokeCursor < s.strokes.length && s.strokes[s.strokeCursor].t <= now) {
+    showStroke(replayStroke(s.scorer, s.strokes[s.strokeCursor++]));
+  }
+}
+
+/** Stops the replay and returns to normal play. */
+function closeReplay() {
+  if (!replay) return;
+  replay = null;
+  if (session) stopSession(false);
+  lockSetup(false);
+  renderTransport();
+  renderPlayMode();
+  resetLive();
+  drawSongChart();
+}
 
 // ================================================================ song loading
 
@@ -957,8 +1224,8 @@ function mixStems(stems) {
 const hasDrumStem = () => !!song?.stems?.some(x => x.drums) && song.stems.some(x => !x.drums);
 
 /** The music to play: the full mix, or the stems without the drums if they're switched off. */
-function musicBuffer() {
-  if (settings.drumStem || !hasDrumStem()) return song.buffer;
+function musicBuffer(drumStem = settings.drumStem) {
+  if (drumStem || !hasDrumStem()) return song.buffer;
   return (song.backing ||= mixStems(song.stems.filter(x => !x.drums)));
 }
 
@@ -1181,6 +1448,11 @@ function renderPlayMode() {
   const box = $('playModeBox'), sel = $('playMode');
   box.hidden = settings.mode !== 'song' || !song?.diff;
   if (box.hidden) return;
+  if (replay) { // the replay's difficulty, which can't be changed
+    sel.innerHTML = `<option>${escapeHtml(replay.replay.song?.play || '')}</option>`;
+    sel.disabled = true;
+    return;
+  }
   const opts = [['free', 'Free play']];
   if (song.diff.format === 'ch') {
     song.diffs.forEach((d, i) => {
@@ -1195,7 +1467,7 @@ function renderPlayMode() {
     + (song.diff.format === 'ch' ? '' : '<option disabled>More difficulties available on Clone Hero charts</option>');
   const play = chartPlay();
   sel.value = song.generating || play?.auto ? 'auto' : play ? `${song.diffs.indexOf(play.diff)}${play.plus ? '+' : ''}` : 'free';
-  sel.disabled = !!song.generating;
+  sel.disabled = !!(song.generating || session || replay);
   sel.title = (song.diff.format === 'ch'
     ? 'Free play: jam along on a rhythm grid. A difficulty: play the chart\'s notes, each on its drum.'
     : 'Free play: jam along on a rhythm grid.')
@@ -1304,7 +1576,7 @@ drop.addEventListener('drop', e => {
 window.addEventListener('dragover', e => e.preventDefault());
 window.addEventListener('drop', e => {
   e.preventDefault();
-  if (session || !e.dataTransfer?.items?.length) return;
+  if (session || replay || !e.dataTransfer?.items?.length) return;
   const items = droppedItems(e.dataTransfer);
   setMode('song');
   handleItems(items);
@@ -1368,12 +1640,13 @@ function setMode(mode) {
 document.querySelectorAll('.tab').forEach(t => { t.onclick = () => setMode(t.dataset.mode); });
 
 function updateStartButton() {
-  $('startBtn').disabled = !session && settings.mode === 'song' && !song?.diff;
+  $('startBtn').disabled = !session && !replay && settings.mode === 'song' && !song?.diff;
 }
 
 $('startBtn').onclick = e => {
   e.currentTarget.blur();
-  if (session) stopSession(true);
+  if (replay) closeReplay();
+  else if (session) stopSession(true);
   else { resetLive(); startSession(); }
 };
 
@@ -1615,7 +1888,7 @@ $('audioBuffer').addEventListener('change', async e => {
   calib?.cancel();
   settings.audioBuffer = ms;
   save();
-  kit = null; // drum sounds belong to the old audio context
+  kit = chartKit = replayKit = null; // drum sounds belong to the old audio context
   await audio.setBuffer(ms);
   await audio.init().catch(() => {}); // the change is a user gesture, so the new context can start now
   $('audioBufferNote').hidden = false;
@@ -1725,4 +1998,4 @@ renderLibrary().then(async () => {
 });
 
 // Handy for debugging from the browser console.
-window.drumcoach = { audio, midi, settings, scatter, get session() { return session; }, get song() { return song; } };
+window.drumcoach = { audio, midi, settings, scatter, get session() { return session; }, get replay() { return replay; }, get song() { return song; } };

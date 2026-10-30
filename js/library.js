@@ -38,6 +38,9 @@ export const library = {
       return [];
     }
   },
+  async get(id) {
+    try { return (await run('readonly', s => s.get(id))) || null; } catch { return null; }
+  },
   async put(record) {
     try { await run('readwrite', s => s.put(record)); } catch (err) { console.warn('Could not save song', err); }
   },

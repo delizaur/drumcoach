@@ -18,6 +18,7 @@ It's a fully static site: no backend, no build step, no dependencies. Everything
 - **Automatic rhythm grid (default):** 8ths with 16ths allowed in straight sections (only 8ths above 200 BPM), triplets in the triplet sections, and sextuplets inside them wherever at least two of the detailed difficulties (60%+ of the most detailed one's off-beat notes) agree (`js/autogrid.js`). Straight sections never switch to 32nds: beatmaps often have short 1/8 bursts that follow guitar or vocals, and a grid that changes every few beats is hard to read.
 - **Rhythm grids:** hybrid grids (the default is 8ths with 16ths allowed, plus quarters with 8ths, and 8ths with triplets), quarters, halves, 8ths, off-beats, triplets, swing, 16ths, gallops, sextuplets, backbeat, son clave, or your own grid (for example `x..x..x.` in 16ths).
 - **Feedback:** a scrolling timeline with a lane per drum (cymbals, hi-hat, toms, snare, kick, top to bottom as in drum notation), an osu!-style hit-error meter, live accuracy / mean offset / consistency (σ and UR), a timing-over-time chart, and an end-of-session report broken down by drum, subdivision and tempo.
+- **Replays,** to track your progress over time. The results screen exports a session as a replay file (`.replay.json`): everything the results screen shows, plus every stroke with its timing and judgment, and the grid or chart notes and tempo map it was played on, so a replay keeps its results however the song's settings or the scoring change later (`js/replay.js`). **Export replay + song** packs the replay and the song's files in a `.replay.zip`; opening it adds the song to the library if it isn't there. **Import replay** (next to the Start button) opens either kind on the results screen, and **Play replay** plays it back: the song (or the metronome) with the strokes on the synthesized kit, scored again as they come in so the timeline and the live numbers fill in as they did. Click the timing chart to jump anywhere; **Stop replay** returns to normal play.
 - **Latency calibration:** tap along to a click and the app measures your whole setup's offset (kit → USB → browser → speakers → ears).
 - Loaded songs are kept in your browser (IndexedDB), so you don't have to drop them again.
 
@@ -61,7 +62,8 @@ js/main.js        app wiring, UI, session lifecycle
 js/audio.js       AudioContext clock, music playback, metronome clicks
 js/midi.js        Web MIDI input
 js/drums.js       synthesized drum kit for pad sounds
-js/zip.js         minimal .osz/.zip reader using DecompressionStream
+js/zip.js         minimal .osz/.zip reader using DecompressionStream, and writer
+js/replay.js      replay files (export, import, bundling with the song)
 js/osu.js         .osu parsing (metadata, red-line timing points)
 js/clonehero.js   Clone Hero charts (.chart, notes.mid, song.ini, audio stems)
 js/sng.js         .sng chart container reader
@@ -79,4 +81,4 @@ js/calibration.js latency calibration
 js/library.js     IndexedDB song storage
 ```
 
-For debugging, `window.drumcoach` in the browser console exposes the audio engine, the MIDI input, the settings and the current session.
+For debugging, `window.drumcoach` in the browser console exposes the audio engine, the MIDI input, the settings, the current session and the replay being watched.

@@ -19,6 +19,7 @@ It's a fully static site: no backend, no build step, no dependencies. Everything
 - **Rhythm grids:** hybrid grids (the default is 8ths with 16ths allowed, plus quarters with 8ths, and 8ths with triplets), quarters, halves, 8ths, off-beats, triplets, swing, 16ths, gallops, sextuplets, backbeat, son clave, or your own grid (for example `x..x..x.` in 16ths).
 - **Feedback:** a scrolling timeline with a lane per drum (cymbals, hi-hat, toms, snare, kick, top to bottom as in drum notation), an osu!-style hit-error meter, live accuracy / mean offset / consistency (σ and UR), a timing-over-time chart, and an end-of-session report broken down by drum, subdivision and tempo.
 - **Replays,** to track your progress over time. The results screen exports a session as a replay file (`.replay.json`): everything the results screen shows, plus every stroke with its timing and judgment, and the grid or chart notes and tempo map it was played on, so a replay keeps its results however the song's settings or the scoring change later (`js/replay.js`). **Export replay + song** packs the replay and the song's files in a `.replay.zip`; opening it adds the song to the library if it isn't there. **Import replay** (next to the Start button) opens either kind on the results screen, and **Play replay** plays it back: the song (or the metronome) with the strokes on the synthesized kit, scored again as they come in so the timeline and the live numbers fill in as they did. Click the timing chart to jump anywhere; **Stop replay** returns to normal play.
+- **Welcome and guided tour:** on the first visit, a welcome offers a six-step tour of the main controls (`js/tour.js`); the browser only asks for MIDI permission at the tour's first step, or when the welcome is skipped. **How it works** in the top bar opens it again.
 - **Latency calibration:** tap along to a click and the app measures your whole setup's offset (kit → USB → browser → speakers → ears).
 - Loaded songs are kept in your browser (IndexedDB), so you don't have to drop them again.
 
@@ -79,6 +80,7 @@ js/scorer.js      hit matching, judgments, statistics
 js/render.js      canvas views (timeline, error meter, charts)
 js/calibration.js latency calibration
 js/library.js     IndexedDB song storage
+js/tour.js        guided tour (highlight and card next to each control)
 ```
 
 For debugging, `window.drumcoach` in the browser console exposes the audio engine, the MIDI input, the settings, the current session and the replay being watched.

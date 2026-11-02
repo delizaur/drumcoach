@@ -16,6 +16,7 @@
       <span>Drum<b>Coach</b></span>
     </div>
     <div class="top-actions">
+      <button id="tourBtn" class="btn ghost" title="Welcome and guided tour"><span class="long">How it works</span><span class="short" aria-hidden="true">?</span></button>
       <button id="midiChip" class="chip" title="MIDI input status — click for input settings">
         <span class="dot"></span><span id="midiLabel">MIDI…</span>
       </button>
@@ -410,6 +411,18 @@
       <div class="dialog-actions">
         <button class="btn primary" id="browseBtn" type="button">Choose files…</button>
         <button class="btn" id="folderBtn" type="button">Choose folder…</button>
+      </div>
+    </div>
+  </dialog>
+
+  <dialog id="welcomeDialog" class="dialog welcome">
+    <div class="dialog-inner">
+      <h2>Welcome to DrumCoach!</h2>
+      <p>Practice your drumming by playing along to your favorite songs.</p>
+      <p>To get familiar with the app, you can take a short guided tour.</p>
+      <div class="dialog-actions">
+        <button class="btn" id="welcomeSkip" type="button">Skip</button>
+        <button class="btn primary" id="welcomeTour" type="button">Take the tour</button>
       </div>
     </div>
   </dialog>

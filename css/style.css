@@ -310,6 +310,31 @@ input[type=range] { width: 100%; accent-color: var(--accent); margin: 6px 0 2px;
 .add-notes li { margin: 4px 0; }
 @media (max-width: 760px) { .add-options { grid-template-columns: 1fr; } }
 .dialog::backdrop { background: rgba(5, 6, 9, .7); backdrop-filter: blur(3px); }
+.dialog.welcome { width: min(460px, calc(100vw - 32px)); }
+.dialog.welcome h2 { margin-bottom: 10px; }
+.dialog.welcome p { color: var(--muted); }
+
+/* guided tour */
+.tour-blocker { position: fixed; inset: 0; z-index: 100; }
+.tour-spot {
+  position: fixed; z-index: 101; pointer-events: none; border-radius: 12px;
+  box-shadow: 0 0 0 2px var(--accent), 0 0 0 9999px rgba(5, 6, 9, .68);
+  transition: left .2s, top .2s, width .2s, height .2s;
+}
+.tour-card {
+  position: fixed; z-index: 102; width: min(340px, calc(100vw - 24px));
+  background: var(--panel); border: 1px solid var(--border); border-radius: var(--radius);
+  padding: 16px 18px 14px; box-shadow: 0 20px 60px rgba(0, 0, 0, .6);
+  transition: left .2s, top .2s;
+}
+.tour-card h2 { font-size: 17px; margin: 2px 0 8px; }
+.tour-count { color: var(--accent); font-size: 12px; font-weight: 600; letter-spacing: .06em; }
+.tour-text { font-size: 14px; color: var(--muted); }
+.tour-text p { margin: 0 0 8px; }
+.tour-text b { color: var(--text); }
+.tour-actions { display: flex; justify-content: space-between; gap: 10px; margin-top: 14px; }
+#tourBtn .short { display: none; }
+@media (max-width: 560px) { #tourBtn .long { display: none; } #tourBtn .short { display: inline; } }
 .dialog-inner { padding: 20px 22px 18px; }
 .dialog-head { display: flex; justify-content: space-between; align-items: center; margin-bottom: 8px; }
 .dialog-head .btn.icon { background: transparent; border-color: transparent; }

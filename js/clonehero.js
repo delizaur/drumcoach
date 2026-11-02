@@ -286,7 +286,7 @@ function chartDifficulties(chart, toMs, kind) {
   });
 }
 
-/** The notes of a chart DrumCoach generated itself (see autochart.js): its Expert pro drums. */
+/** The notes of a chart DrumGrade generated itself (see autochart.js): its Expert pro drums. */
 export function generatedChartNotes(text) {
   const chart = parseChart(text);
   return chartDifficulties(chart, chartTiming(chart, chart.meta.offsetMs).toMs, 'pro')[0]?.chartNotes || [];

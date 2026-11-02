@@ -23,7 +23,7 @@ const $ = id => document.getElementById(id);
 
 // ================================================================ settings
 
-const SETTINGS_KEY = 'drumcoach.settings.v1';
+const SETTINGS_KEY = 'drumcoach.settings.v1'; // from the app's old name, kept so existing settings stay
 const DEFAULTS = {
   mode: 'song',
   // input
@@ -904,7 +904,7 @@ function replayData(s) {
   snap.judge.length = notes.length;
   if (snap.skipped) snap.skipped.length = notes.length;
   return {
-    format: REPLAY_FORMAT, version: REPLAY_VERSION, app: 'DrumCoach',
+    format: REPLAY_FORMAT, version: REPLAY_VERSION, app: 'DrumGrade',
     playedAt: new Date(s.startedAt).toISOString(),
     title: s.title, mode: s.mode, song: s.song,
     // what the results screen shows, readable without the app
@@ -1909,7 +1909,7 @@ function updateLatencyInfo() {
   const ms = audio.outputLatencyMs;
   $('latencyInfo').textContent = ms == null
     ? 'Start a session once to see the latency your browser reports for audio output.'
-    : `Your browser reports ${ms.toFixed(0)} ms of audio output latency. DrumCoach already corrects for this, so the value above only needs to cover what's left.`;
+    : `Your browser reports ${ms.toFixed(0)} ms of audio output latency. DrumGrade already corrects for this, so the value above only needs to cover what's left.`;
 }
 
 function openSettings() {
@@ -2072,4 +2072,4 @@ renderLibrary().then(async () => {
 if (!settings.onboarded) $('welcomeDialog').showModal();
 
 // Handy for debugging from the browser console.
-window.drumcoach = { audio, midi, settings, scatter, get session() { return session; }, get replay() { return replay; }, get song() { return song; } };
+window.drumgrade = { audio, midi, settings, scatter, get session() { return session; }, get replay() { return replay; }, get song() { return song; } };

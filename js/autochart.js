@@ -79,7 +79,7 @@ export function chartText(hits, sections, { title, artist }) {
   const body = [...notes.keys()].sort((a, b) => a - b).flatMap(tick => [...notes.get(tick)].map(n => `  ${tick} = ${n}`));
   return [
     '[Song]', '{',
-    `  Name = ${quoted(title)}`, `  Artist = ${quoted(artist)}`, `  Charter = ${quoted('DrumCoach (ADTOF, auto-generated)')}`,
+    `  Name = ${quoted(title)}`, `  Artist = ${quoted(artist)}`, `  Charter = ${quoted('DrumGrade (ADTOF, auto-generated)')}`,
     `  Offset = ${+(t0 / 1000).toFixed(4)}`, `  Resolution = ${RES}`,
     '}',
     '[SyncTrack]', '{', ...sync.map(([tick, v]) => `  ${tick} = ${v}`), '}',

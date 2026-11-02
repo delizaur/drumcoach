@@ -1,6 +1,6 @@
 // Keeps loaded beatmaps in IndexedDB so they don't have to be dropped again on every visit.
 
-const DB_NAME = 'drumcoach';
+const DB_NAME = 'drumcoach'; // from the app's old name, kept so existing libraries stay
 const STORE = 'songs';
 let dbPromise = null;
 

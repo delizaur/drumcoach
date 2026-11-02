@@ -3,7 +3,8 @@
 // the song's settings there. "Replay + song" bundles it in a ZIP with the song's files.
 import { readZip, writeZip } from './zip.js';
 
-export const REPLAY_FORMAT = 'drumcoach-replay';
+export const REPLAY_FORMAT = 'drumgrade-replay';
+const OLD_FORMATS = ['drumcoach-replay']; // from when the app was called DrumCoach
 export const REPLAY_VERSION = 1;
 const REPLAY_NAME = 'replay.json';
 const SONG_DIR = 'song/';
@@ -17,8 +18,8 @@ export const encodeReplay = data => JSON.stringify(data, replacer);
 function decodeReplay(text) {
   let data;
   try { data = JSON.parse(text, reviver); } catch { data = null; }
-  if (data?.format !== REPLAY_FORMAT) throw new Error("This isn't a DrumCoach replay file.");
-  if (!(data.version <= REPLAY_VERSION)) throw new Error('This replay was made by a newer version of DrumCoach. Reload the page to update it.');
+  if (data?.format !== REPLAY_FORMAT && !OLD_FORMATS.includes(data?.format)) throw new Error("This isn't a DrumGrade replay file.");
+  if (!(data.version <= REPLAY_VERSION)) throw new Error('This replay was made by a newer version of DrumGrade. Reload the page to update it.');
   return data;
 }
 
@@ -48,7 +49,7 @@ export async function readReplayFile(file) {
   if (head[0] !== 0x50 || head[1] !== 0x4b) return { data: decodeReplay(await file.text()), songItems: null }; // not "PK"
   const entries = await readZip(file);
   const main = entries.find(e => e.name === REPLAY_NAME);
-  if (!main) throw new Error("This ZIP file doesn't contain a DrumCoach replay.");
+  if (!main) throw new Error("This ZIP file doesn't contain a DrumGrade replay.");
   const data = decodeReplay(new TextDecoder().decode(await main.bytes()));
   const songItems = [];
   for (const e of entries) {

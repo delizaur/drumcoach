@@ -1,4 +1,4 @@
-# DrumCoach
+# DrumGrade
 
 A browser-based timing trainer for electronic drum kits. Connect your kit over USB, play along to a metronome, an [osu!](https://osu.ppy.sh) beatmap, a [Clone Hero](https://clonehero.net) chart or any audio file, and see exactly how early or late every hit is.
 
@@ -83,4 +83,4 @@ js/library.js     IndexedDB song storage
 js/tour.js        guided tour (highlight and card next to each control)
 ```
 
-For debugging, `window.drumcoach` in the browser console exposes the audio engine, the MIDI input, the settings, the current session and the replay being watched.
+For debugging, `window.drumgrade` in the browser console exposes the audio engine, the MIDI input, the settings, the current session and the replay being watched.

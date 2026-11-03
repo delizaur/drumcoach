@@ -294,22 +294,9 @@
     <form method="dialog" class="dialog-inner">
       <header class="dialog-head"><h2>Settings</h2><button class="btn icon" value="close" aria-label="Close">✕</button></header>
 
-      <h3>MIDI input</h3>
-      <div class="field-row">
-        <div class="field grow">
-          <label for="midiInput">Device</label>
-          <select id="midiInput"></select>
-        </div>
-        <div class="field">
-          <label for="minVelocity">Ignore below velocity <output id="minVelocityLabel"></output></label>
-          <input id="minVelocity" type="range" min="1" max="60" step="1">
-        </div>
-      </div>
-      <p class="hint" id="midiHelp"></p>
-      <div class="last-hit" id="lastHit">Hit a pad to test the connection.</div>
-      <label>Pads <small>Click a pad to ignore it, for example the hi-hat pedal if you keep time with your foot.</small></label>
-      <div class="pads" id="padList"><span class="hint">No pads seen yet.</span></div>
-      <label class="switch"><input type="checkbox" id="keyboardOn"><span class="track"></span>Also accept keyboard (Space = kick, F/J = snare, D/K = hi-hat)</label>
+      <h3>Input device</h3>
+      <p class="hint">Your kit's MIDI connection, the pads it sends, and how to hear the music together with your drums.</p>
+      <button type="button" class="btn" id="openInputFromSettings">Input device settings…</button>
 
       <h3>Drum sounds</h3>
       <label class="switch"><input type="checkbox" id="padSounds"><span class="track"></span>Play drum sounds when you hit a pad</label>
@@ -351,6 +338,45 @@
       <p class="hint" id="latencyInfo"></p>
       <div class="dialog-actions">
         <button type="button" class="btn" id="openCalibFromSettings">Run calibration</button>
+        <button class="btn primary" value="close">Done</button>
+      </div>
+    </form>
+  </dialog>
+
+  <!-- Input device: MIDI and audio setup -->
+  <dialog id="inputDialog" class="dialog">
+    <form method="dialog" class="dialog-inner">
+      <header class="dialog-head"><h2>Input device</h2><button class="btn icon" value="close" aria-label="Close">✕</button></header>
+
+      <h3>MIDI input</h3>
+      <div class="field-row">
+        <div class="field grow">
+          <label for="midiInput">Device</label>
+          <select id="midiInput"></select>
+        </div>
+        <div class="field">
+          <label for="minVelocity">Ignore below velocity <output id="minVelocityLabel"></output></label>
+          <input id="minVelocity" type="range" min="1" max="60" step="1">
+        </div>
+      </div>
+      <p class="hint" id="midiHelp"></p>
+      <div class="last-hit" id="lastHit">Hit a pad to test the connection.</div>
+      <label>Pads <small>Click a pad to ignore it, for example the hi-hat pedal if you keep time with your foot.</small></label>
+      <div class="pads" id="padList"><span class="hint">No pads seen yet.</span></div>
+      <label class="switch"><input type="checkbox" id="keyboardOn"><span class="track"></span>Also accept keyboard (Space = kick, F/J = snare, D/K = hi-hat)</label>
+
+      <h3>Audio setup</h3>
+      <p class="hint">To hear the drum sounds and the music at the same time, try one of the following ways:</p>
+      <ol class="audio-setup">
+        <li><b>Aux cable</b> <span class="tag good">Recommended</span>
+          <p>Connect this device's headphone output to your module's audio input (often called <i>Mix in</i> or <i>Aux in</i>), and plug your headphones or speakers into the module.</p></li>
+        <li><b>Audio over USB</b>
+          <p>No aux cable? Many modules can also play audio over the USB cable you use for MIDI. This may need a driver or a special mode on the module (see its manual); then pick the module as this device's audio output, and plug your headphones or speakers into the module. USB audio can add some latency, so run the calibration again afterwards.</p></li>
+        <li><b>Synthesized drum sounds</b> <span class="tag">Least recommended</span>
+          <p>Turn on <i>Play drum sounds when you hit a pad</i> in Settings and simply listen through this device. It's the simplest setup, but it has the most latency, and that's hard to get rid of.</p></li>
+      </ol>
+      <div class="dialog-actions">
+        <button type="button" class="btn" id="openCalibFromInput">Run calibration</button>
         <button class="btn primary" value="close">Done</button>
       </div>
     </form>

@@ -788,7 +788,7 @@ function insightsFor(st, slotRows, tempoRows, laneRows) {
   if (missRate > 0.1) out.push(`${(missRate * 100).toFixed(0)}% of your strokes were too far from ${st.chart ? 'the chart\'s notes on their drum' : 'the grid'} and counted as misses.`);
   const skipRate = st.chart ? st.skipped / (st.nHits + st.skipped) : 0;
   if (skipRate > 0.1) out.push(`You skipped ${(skipRate * 100).toFixed(0)}% of the chart's notes. If that's too many to keep up with, try an easier difficulty or a slower speed.`);
-  if (st.extra > Math.max(4, 0.1 * st.judged)) out.push(`${st.extra} strokes doubled up on a grid note that was already played. If a pad you aren't practicing with (like the hi-hat pedal) caused them, mute it in Settings. If you're playing faster notes on purpose, pick a finer rhythm grid.`);
+  if (st.extra > Math.max(4, 0.1 * st.judged)) out.push(`${st.extra} strokes doubled up on a grid note that was already played. If a pad you aren't practicing with (like the hi-hat pedal) caused them, mute it in the input device settings (click the MIDI status at the top). If you're playing faster notes on purpose, pick a finer rhythm grid.`);
   return out;
 }
 
@@ -2033,13 +2033,21 @@ function updateLatencyInfo() {
 
 function openSettings() {
   updateLatencyInfo();
-  renderMidiStatus();
-  renderPads();
   $('settingsDialog').showModal();
 }
 $('settingsBtn').onclick = openSettings;
-$('midiChip').onclick = openSettings;
 $('openCalibFromSettings').onclick = () => { $('settingsDialog').close(); openCalibration(); };
+
+/** The input device window: MIDI device, pads, keyboard, and how to set up the audio. */
+function openInput() {
+  startMidi(); // in case the welcome was never dismissed
+  renderMidiStatus();
+  renderPads();
+  $('inputDialog').showModal();
+}
+$('midiChip').onclick = openInput;
+$('openInputFromSettings').onclick = () => { $('settingsDialog').close(); openInput(); };
+$('openCalibFromInput').onclick = () => { $('inputDialog').close(); openCalibration(); };
 
 // ================================================================ calibration dialog
 

@@ -314,6 +314,12 @@ input[type=range] { width: 100%; accent-color: var(--accent); margin: 6px 0 2px;
 .dialog.welcome h2 { margin-bottom: 10px; }
 .dialog.welcome p { color: var(--muted); }
 
+/* input device: audio setup options */
+.audio-setup { margin: 8px 0 0; padding-left: 20px; display: flex; flex-direction: column; gap: 10px; font-size: 14px; }
+.audio-setup p { margin: 2px 0 0; color: var(--muted); font-size: 13.5px; }
+.audio-setup .tag { display: inline-block; margin-left: 6px; padding: 0 7px; border-radius: 999px; font-size: 11.5px; font-weight: 600; color: var(--muted); border: 1px solid var(--border); vertical-align: 1px; }
+.audio-setup .tag.good { color: var(--great); border-color: color-mix(in srgb, var(--great) 45%, transparent); }
+
 /* drum removal */
 .dialog.drumless { width: min(480px, calc(100vw - 32px)); }
 .dialog.drumless h2 { margin-bottom: 10px; }

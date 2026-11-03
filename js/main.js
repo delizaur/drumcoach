@@ -16,7 +16,7 @@ import { Calibration } from './calibration.js';
 import { DrumKit } from './drums.js';
 import { library } from './library.js';
 import { Tour } from './tour.js';
-import { removeDrums, modelDownloaded, DRUMLESS_VERSION, MODEL_MB } from './drumless.js';
+import { removeDrums, modelDownloaded, gpuSupported, DRUMLESS_VERSION, MODEL_MB } from './drumless.js';
 import { REPLAY_FORMAT, REPLAY_VERSION, encodeReplay, replayFileName, bundleReplay, readReplayFile, download } from './replay.js';
 import { lowerBound, clamp, fmtTime, fmtMs, escapeHtml, basename } from './util.js';
 
@@ -1648,7 +1648,8 @@ async function openDrumlessDialog() {
   $('drumlessGo').hidden = false;
   $('drumlessGo').disabled = false;
   $('drumlessCancel').textContent = 'Cancel';
-  const cached = await modelDownloaded(), status = $('drumlessModel');
+  const [cached, gpu] = await Promise.all([modelDownloaded(), gpuSupported()]), status = $('drumlessModel');
+  $('drumlessNoGpu').hidden = gpu;
   status.classList.toggle('ok', cached);
   status.innerHTML = cached
     ? `${CHECK_ICON} The AI model is already downloaded.`
@@ -1681,10 +1682,16 @@ $('drumlessGo').onclick = async () => {
   download.querySelector('.phase-name').textContent = `Downloading the AI model (${MODEL_MB} MB)`;
   if (await modelDownloaded()) download.dataset.skipped = '1'; else delete download.dataset.skipped;
   for (const li of $('drumlessPhases').children) li.querySelector('.phase-bar i').style.width = '0';
+  const backend = $('drumlessPhases').querySelector('.phase-backend');
+  backend.textContent = '';
   showDrumlessPhase(download.dataset.skipped ? 'load' : 'download', 0);
   $('drumlessPhases').hidden = false;
   try {
-    const wav = await removeDrums(target.buffer, { signal: job.signal, onProgress: showDrumlessPhase });
+    const wav = await removeDrums(target.buffer, {
+      signal: job.signal,
+      onProgress: showDrumlessPhase,
+      onBackend: b => { backend.textContent = b === 'webgpu' ? '(GPU)' : '(CPU)'; },
+    });
     showDrumlessPhase('done', 1);
     target.drumless = await audio.decode(new Uint8Array(await wav.arrayBuffer()));
     await library.update(target.key, { drumless: { v: DRUMLESS_VERSION, wav } });

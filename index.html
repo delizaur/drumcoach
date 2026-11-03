@@ -470,11 +470,12 @@
       <div id="drumlessAsk">
         <p>Removing the drums uses an AI model that splits the song into its instruments, right here in your browser. The model has to be fetched from Hugging Face, and the conversion can take 1–2 minutes.</p>
         <p class="model-status" id="drumlessModel"></p>
+        <p class="model-status warn" id="drumlessNoGpu" hidden>This device doesn't support GPU-accelerated removal, so it runs on the CPU and might take very long.</p>
       </div>
       <ol class="phases" id="drumlessPhases" hidden>
         <li data-stage="download"><span class="phase-name">Downloading the AI model</span><span class="phase-state"></span><div class="phase-bar"><i></i></div></li>
         <li data-stage="load"><span class="phase-name">Loading it into memory</span><span class="phase-state"></span><div class="phase-bar"><i></i></div></li>
-        <li data-stage="separate"><span class="phase-name">Removing the drums</span><span class="phase-state"></span><div class="phase-bar"><i></i></div></li>
+        <li data-stage="separate"><span class="phase-name">Removing the drums <span class="phase-backend"></span></span><span class="phase-state"></span><div class="phase-bar"><i></i></div></li>
       </ol>
       <p class="error" id="drumlessError" hidden></p>
       <div class="dialog-actions">

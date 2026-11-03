@@ -13,6 +13,7 @@ self.onmessage = async ({ data: { left, right } }) => {
   try {
     ready ||= loadModel().then(createSession);
     const { session, backend } = await ready;
+    self.postMessage({ type: 'backend', backend });
     const run = async (mix, mag, segment, bins, frames) => {
       const out = await session.run({
         mix: new ort.Tensor('float32', mix, [1, 2, segment]),

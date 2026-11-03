@@ -328,6 +328,7 @@ input[type=range] { width: 100%; accent-color: var(--accent); margin: 6px 0 2px;
 .dialog.drumless p { color: var(--muted); }
 .model-status { display: flex; align-items: center; gap: 8px; font-size: 13.5px; }
 .model-status.ok { color: var(--great) !important; }
+.model-status.warn { color: var(--off) !important; }
 .model-status svg { width: 16px; height: 16px; fill: none; stroke: currentColor; stroke-width: 2.5; stroke-linecap: round; stroke-linejoin: round; flex: none; }
 .phases { list-style: none; padding: 0; margin: 14px 0 0; display: flex; flex-direction: column; gap: 12px; }
 .phases li { display: grid; grid-template-columns: 1fr auto; gap: 6px 10px; font-size: 14px; color: var(--faint); }

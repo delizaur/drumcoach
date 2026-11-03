@@ -52,12 +52,21 @@ export async function saveModel(bytes) {
   }
 }
 
+let gpu = null;
+/** Whether this browser offers WebGPU with a usable adapter, so the model can run on the GPU. */
+export function gpuSupported() {
+  return gpu ||= (async () => {
+    try { return !!(await navigator.gpu?.requestAdapter()); } catch { return false; }
+  })();
+}
+
 /**
  * The song without its drums, as a WAV file. `onProgress(stage, fraction)` reports 'download' (only
- * when the model isn't cached), 'load' and 'separate'. Aborting the signal stops the work.
+ * when the model isn't cached), 'load' and 'separate'; `onBackend('webgpu' | 'wasm')` tells where the
+ * model runs once it's loaded. Aborting the signal stops the work.
  * @returns {Promise<Blob>}
  */
-export async function removeDrums(buffer, { onProgress = () => {}, signal } = {}) {
+export async function removeDrums(buffer, { onProgress = () => {}, onBackend = () => {}, signal } = {}) {
   // the model works on 44.1 kHz stereo; mono songs are spread to both channels
   const ctx = new OfflineAudioContext(2, Math.ceil(buffer.duration * MODEL_SAMPLE_RATE), MODEL_SAMPLE_RATE);
   const src = ctx.createBufferSource();
@@ -74,6 +83,7 @@ export async function removeDrums(buffer, { onProgress = () => {}, signal } = {}
       signal?.addEventListener('abort', () => reject(signal.reason), { once: true });
       worker.onmessage = ({ data }) => {
         if (data.type === 'progress') onProgress(data.stage, data.value);
+        else if (data.type === 'backend') onBackend(data.backend);
         else if (data.type === 'error') reject(new Error(data.message));
         else resolve(new Blob([data.wav], { type: 'audio/wav' }));
       };

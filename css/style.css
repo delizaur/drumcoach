@@ -314,6 +314,8 @@ input[type=range] { width: 100%; accent-color: var(--accent); margin: 6px 0 2px;
 .dialog.welcome h2 { margin-bottom: 10px; }
 .dialog.welcome p { color: var(--muted); }
 
+.inline-number { display: flex; align-items: center; gap: 8px; flex-wrap: wrap; }
+
 /* input device: audio setup options */
 .audio-setup { margin: 8px 0 0; padding-left: 20px; display: flex; flex-direction: column; gap: 10px; font-size: 14px; }
 .audio-setup p { margin: 2px 0 0; color: var(--muted); font-size: 13.5px; }

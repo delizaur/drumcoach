@@ -39,6 +39,8 @@ const DEFAULTS = {
   clickMode: 'beats', clickVolume: 0.7, strictness: 'normal',
   // song
   rate: 1, musicVolume: 0.85, chartVolume: 0, songClick: false, drumStem: true, lastSong: null, songPrefs: {},
+  autoFastBpm: 200, // the automatic grid drops 16ths above this tempo
+  calibBpm: 140,
   autoSync: true, syncFineTune: 0, syncMigrated: false, useTriplets: true,
   openGroups: { playalongGroup: true, libraryBox: true }, // collapsible panel sections
   timelineZoom: 1, showWindows: false, // scrolling grid view
@@ -226,9 +228,8 @@ function strokeRecord(t, note, vel, res) {
 
 // ================================================================ session
 
-// The automatic grid uses plain 8ths on sections faster than this. Same slots as the 16th grid
-// (subdivision 4), so the results group them with the 8ths of slower sections.
-const AUTO_FAST_BPM = 200;
+// The automatic grid uses plain 8ths on sections faster than settings.autoFastBpm. Same slots as the
+// 16th grid (subdivision 4), so the results group them with the 8ths of slower sections.
 const AUTO_FAST = makePattern({ id: 'auto-fast', name: '8ths', subdiv: 4, grid: 'x.x.' });
 
 function currentPattern() {
@@ -495,7 +496,7 @@ function songTiming() {
 
 function makeGrid(sections, pattern, rate, triplets, sextuplets) {
   // the automatic grid drops the 16ths on fast sections (real tempo, after the playback rate)
-  const patternFor = settings.pattern === 'auto' ? s => 60000 / s.beatLength * rate > AUTO_FAST_BPM ? AUTO_FAST : pattern : null;
+  const patternFor = settings.pattern === 'auto' ? s => 60000 / s.beatLength * rate > settings.autoFastBpm ? AUTO_FAST : pattern : null;
   return buildGrid(sections, pattern, { tripletBeats: triplets, sextupletBeats: sextuplets, patternFor });
 }
 
@@ -1826,6 +1827,15 @@ bind('clickVolume', 'clickVolume', { after: v => audio.setClickVolume(v) });
 bind('chartVolume', 'chartVolume', { after: v => { if (chartKit) chartKit.volume = v; } });
 bind('songClick', 'songClick', { event: 'change', after: syncClickControls });
 bind('drumStem', 'drumStem', { event: 'change' });
+bind('autoFastBpm', 'autoFastBpm', { parse: intIn(60, 400), event: 'change', after: renderAutoFast });
+/** The 16th-note tempo limit, wherever it's mentioned, and the grids that use it. */
+function renderAutoFast() {
+  $('autoFastBpm').value = settings.autoFastBpm;
+  for (const el of document.querySelectorAll('.auto-fast-bpm')) el.textContent = settings.autoFastBpm;
+  renderAutoInfo();
+  drawSongChart();
+}
+bind('calibBpm', 'calibBpm', { parse: intIn(60, 240), event: 'change', after: v => { $('calibBpm').value = v; } });
 bind('useTriplets', 'useTriplets', { event: 'change', after: () => { renderAutoInfo(); drawSongChart(); } });
 /** Click type and volume only matter in song mode when the click track is on. */
 // Collapsible sections remember whether they were open.
@@ -1852,7 +1862,7 @@ function renderAutoInfo() {
   el.hidden = settings.pattern !== 'auto';
   if (el.hidden) return;
   if (settings.mode !== 'song' || !song?.diff || song.diff.plain) {
-    el.textContent = `Without a beatmap or chart this works like "8ths, 16ths allowed", with only 8ths above ${AUTO_FAST_BPM} BPM.`;
+    el.textContent = `Without a beatmap or chart this works like "8ths, 16ths allowed", with only 8ths above ${settings.autoFastBpm} BPM.`;
     return;
   }
   const parts = [];
@@ -1861,7 +1871,7 @@ function renderAutoInfo() {
   const sext = settings.useTriplets ? song.finer?.sextuplets.length || 0 : 0;
   if (sext) parts.push(`sextuplets in ${sext} beat${sext > 1 ? 's' : ''}`);
   const source = song.diff.format === 'ch' ? 'chart' : 'beatmap';
-  el.textContent = `8ths and 16ths (only 8ths above ${AUTO_FAST_BPM} BPM)` + (parts.length
+  el.textContent = `8ths and 16ths (only 8ths above ${settings.autoFastBpm} BPM)` + (parts.length
     ? `, plus from this ${source}: ${parts.join(', ')}.`
     : `. This ${source} needs nothing else.`);
 }
@@ -2056,6 +2066,7 @@ function openCalibration() {
   if (session) stopSession(false);
   calib?.cancel();
   $('calibIntro').hidden = false;
+  $('calibBpmText').textContent = settings.calibBpm;
   $('calibRun').hidden = true;
   $('calibResult').hidden = true;
   $('calibStart').hidden = false;
@@ -2076,6 +2087,7 @@ $('calibStart').onclick = async e => {
   $('calibCount').textContent = 'Get ready…';
   drawCalibStrip($('calibCanvas'), []);
   calib = new Calibration(audio, {
+    bpm: settings.calibBpm,
     onBeat(k, countIn) {
       if (k < countIn) {
         $('calibCount').textContent = `Count-in: ${countIn - k}`;
@@ -2188,6 +2200,7 @@ $('tourBtn').onclick = openWelcome;
 setMode(settings.mode);
 syncWhen();
 renderPattern();
+renderAutoFast();
 renderStrictness();
 renderPads();
 renderLibrary().then(async () => {

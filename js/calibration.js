@@ -1,15 +1,15 @@
 // Latency calibration: play along to a click and measure the average offset of the hits.
 import { median, meanSd } from './util.js';
 
-const BPM = 140;
-const BEAT_MS = 60000 / BPM;
+export const CALIB_BPM = 140; // default tempo of the click
 const COUNT_IN = 4;
 const TARGET_HITS = 30;
 const TOTAL_CLICKS = COUNT_IN + TARGET_HITS + 6;
 
 export class Calibration {
-  constructor(audio, { onBeat, onProgress, onDone }) {
+  constructor(audio, { bpm = CALIB_BPM, onBeat, onProgress, onDone }) {
     this.audio = audio;
+    this.beatMs = 60000 / bpm;
     this.onBeat = onBeat;
     this.onProgress = onProgress;
     this.onDone = onDone;
@@ -21,7 +21,7 @@ export class Calibration {
     this.audio.start({ startPos: 0, rate: 1, leadIn: 0.3 });
     this.clicks = [];
     for (let k = 0; k < TOTAL_CLICKS; k++) {
-      const t = k * BEAT_MS;
+      const t = k * this.beatMs;
       this.clicks.push(t);
       this.audio.click(this.audio.ctxAtSongTime(t), k % 4 === 0 ? 'accent' : 'beat');
     }
@@ -29,14 +29,14 @@ export class Calibration {
     this.lastHit = -Infinity;
     this.beatShown = -1;
     this.active = true;
-    this.timer = setTimeout(() => this.finish(), TOTAL_CLICKS * BEAT_MS + 900);
+    this.timer = setTimeout(() => this.finish(), TOTAL_CLICKS * this.beatMs + 900);
   }
 
   /** Called every animation frame while active. */
   tick() {
     if (!this.active) return;
     const now = this.audio.audibleSongTime();
-    const k = Math.floor(now / BEAT_MS + 0.0001);
+    const k = Math.floor(now / this.beatMs + 0.0001);
     if (k >= 0 && k < TOTAL_CLICKS && k !== this.beatShown) {
       this.beatShown = k;
       this.onBeat(k, COUNT_IN);
@@ -48,10 +48,10 @@ export class Calibration {
     if (!this.active) return;
     if (songTime - this.lastHit < 60) return; // chord/flam
     this.lastHit = songTime;
-    const k = Math.round(songTime / BEAT_MS);
+    const k = Math.round(songTime / this.beatMs);
     if (k < COUNT_IN || k >= TOTAL_CLICKS) return;
     const err = songTime - this.clicks[k];
-    if (Math.abs(err) > BEAT_MS * 0.45) return;
+    if (Math.abs(err) > this.beatMs * 0.45) return;
     this.errors.push(err);
     this.onProgress(this.errors, TARGET_HITS);
     if (this.errors.length >= TARGET_HITS) this.finish();

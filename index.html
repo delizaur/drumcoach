@@ -173,7 +173,7 @@
             <small class="triplet-info" id="tripletInfo"></small>
           </div>
           <div class="field">
-            <label for="pattern">Rhythm grid <span class="info" tabindex="0" role="button" aria-label="More info">i<span class="tip" role="tooltip"><b>Automatic</b> uses 8ths and 16ths (only 8ths above 200 BPM), and switches to triplets, with sextuplets where needed, in the sections the beatmap or chart has in triplets. Each stroke snaps to the nearest note of this grid. You don't have to play every note: an 8th-note grid also lets you play quarters, or any mix of the two. <b>Hybrid</b> grids snap to the coarser notes (filled) when you're within the good window, and only use the finer ones (outlined) otherwise, so loose 8ths aren't mistaken for 16ths.</span></span></label>
+            <label for="pattern">Rhythm grid <span class="info" tabindex="0" role="button" aria-label="More info">i<span class="tip" role="tooltip"><b>Automatic</b> uses 8ths and 16ths (only 8ths above <span class="auto-fast-bpm">200</span> BPM), and switches to triplets, with sextuplets where needed, in the sections the beatmap or chart has in triplets. Each stroke snaps to the nearest note of this grid. You don't have to play every note: an 8th-note grid also lets you play quarters, or any mix of the two. <b>Hybrid</b> grids snap to the coarser notes (filled) when you're within the good window, and only use the finer ones (outlined) otherwise, so loose 8ths aren't mistaken for 16ths.</span></span></label>
             <select id="pattern"></select>
             <small class="auto-info" id="autoInfo" hidden></small>
           </div>
@@ -307,6 +307,12 @@
         <small>The sounds are synthesized in the browser, so you hear them a little later than your kit's own sound module (USB plus audio output latency). If you monitor through the module, turn this off.</small>
       </div>
 
+      <h3>Automatic rhythm grid</h3>
+      <div class="field">
+        <label class="inline-number">Ignore 16th notes above <input id="autoFastBpm" type="number" min="60" max="400" step="1" class="mini" inputmode="numeric"> BPM</label>
+        <small>On fast songs, 16ths are too close together to tell apart from loose 8ths, so the automatic grid only uses 8ths above this tempo (after the speed setting).</small>
+      </div>
+
       <h3>Song sync</h3>
       <label class="switch"><input type="checkbox" id="autoSyncOn"><span class="track"></span>Auto-sync songs to their drums</label>
       <div class="field">
@@ -336,6 +342,10 @@
         <small>This value is subtracted from every hit. Run the calibration to measure it for your setup. Bluetooth headphones usually need 150 ms or more, so use wired headphones or speakers if you can.</small>
       </div>
       <p class="hint" id="latencyInfo"></p>
+      <div class="field">
+        <label class="inline-number">Calibration click at <input id="calibBpm" type="number" min="60" max="240" step="1" class="mini" inputmode="numeric"> BPM</label>
+        <small>Pick a tempo you play comfortably and steadily.</small>
+      </div>
       <div class="dialog-actions">
         <button type="button" class="btn" id="openCalibFromSettings">Run calibration</button>
         <button class="btn primary" value="close">Done</button>
@@ -387,7 +397,7 @@
     <div class="dialog-inner">
       <header class="dialog-head"><h2>Latency calibration</h2><button class="btn icon" id="calibClose" aria-label="Close">✕</button></header>
       <div id="calibIntro">
-        <p>You'll hear a click at 140 BPM: four count-in clicks, then hit any pad <b>on every click</b> about 30 times. Listen to the click and play as naturally as you can. Don't watch the screen.</p>
+        <p>You'll hear a click at <span id="calibBpmText">140</span> BPM: four count-in clicks, then hit any pad <b>on every click</b> about 30 times. Listen to the click and play as naturally as you can. Don't watch the screen.</p>
         <p class="hint">This measures the whole chain: kit → USB → browser, plus browser → speakers → your ears. Use the same headphones or speakers you practice with.</p>
       </div>
       <div id="calibRun" hidden>

@@ -28,7 +28,7 @@ async function run(mode, fn) {
 }
 
 export const library = {
-  /** @returns {Promise<Array<{id, title, artist, creator, files: File[], usedAt: number}>>} */
+  /** @returns {Promise<Array<{id, title, artist, creator, files: File[], usedAt: number, drumless?: {v, wav: Blob}}>>} */
   async list() {
     try {
       const all = (await run('readonly', s => s.getAll())) || [];
@@ -41,8 +41,19 @@ export const library = {
   async get(id) {
     try { return (await run('readonly', s => s.get(id))) || null; } catch { return null; }
   },
+  /** Saves a song. A song added again keeps the drumless version made of it before. */
   async put(record) {
-    try { await run('readwrite', s => s.put(record)); } catch (err) { console.warn('Could not save song', err); }
+    try {
+      const old = record.drumless ? null : await run('readonly', s => s.get(record.id));
+      await run('readwrite', s => s.put(old?.drumless ? { ...record, drumless: old.drumless } : record));
+    } catch (err) { console.warn('Could not save song', err); }
+  },
+  /** Changes some fields of a saved song. */
+  async update(id, fields) {
+    try {
+      const rec = await run('readonly', s => s.get(id));
+      if (rec) await run('readwrite', s => s.put({ ...rec, ...fields }));
+    } catch (err) { console.warn('Could not save song', err); }
   },
   async touch(id) {
     try {

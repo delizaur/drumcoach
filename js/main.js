@@ -16,6 +16,7 @@ import { Calibration } from './calibration.js';
 import { DrumKit } from './drums.js';
 import { library } from './library.js';
 import { Tour } from './tour.js';
+import { removeDrums, modelDownloaded, DRUMLESS_VERSION, MODEL_MB } from './drumless.js';
 import { REPLAY_FORMAT, REPLAY_VERSION, encodeReplay, replayFileName, bundleReplay, readReplayFile, download } from './replay.js';
 import { lowerBound, clamp, fmtTime, fmtMs, escapeHtml, basename } from './util.js';
 
@@ -336,6 +337,7 @@ async function startSession({ preview = false, from = null } = {}) {
     song: settings.mode === 'song' ? {
       key: song.key, title: song.diff.title, artist: song.diff.artist, creator: song.diff.creator,
       version: song.diff.version, play: play ? play.name : 'Free play', drumStem: settings.drumStem,
+      removeDrums: buffer === song.drumless,
     } : null,
     clicks: buildClicks(grid, clickMode, hiddenBar, startPos),
     clickCursor: 0,
@@ -1038,6 +1040,8 @@ async function startReplay(from) {
   const r = replay;
   if (!r || session) return;
   await audio.init();
+  // played without the drums: so is the replay, if this song has a drumless version here too
+  const noDrums = r.mode === 'song' && !!r.replay.song?.removeDrums && !!(await loadDrumless(song));
   if (replay !== r || session) return;
   audio.setMusicVolume(settings.musicVolume);
   audio.setClickVolume(settings.clickVolume);
@@ -1057,7 +1061,7 @@ async function startReplay(from) {
     lastUi: 0, lastScatter: 0, scatterDirty: true,
   };
   recent.length = 0;
-  audio.start({ buffer: r.mode === 'song' ? musicBuffer(r.replay.song?.drumStem ?? true) : null, startPos: from, rate: r.rate, leadIn: 0.15 });
+  audio.start({ buffer: r.mode === 'song' ? musicBuffer(r.replay.song?.drumStem ?? true, noDrums) : null, startPos: from, rate: r.rate, leadIn: 0.15 });
   session.dropoutsAtStart = audio.dropoutStats();
   scheduleClicks();
   schedulerTimer = setInterval(scheduleClicks, 20);
@@ -1172,6 +1176,7 @@ async function loadSong(list, { fromLibrary = false } = {}) {
       await setupPlain(next);
     }
     startSync(next);
+    if (prefs?.removeDrums && !(await loadDrumless(next))) prefs.removeDrums = false;
     if (song?.bgUrl) URL.revokeObjectURL(song.bgUrl);
     song = next;
     songPrefs().diff = song.diffIndex;
@@ -1233,8 +1238,12 @@ function mixStems(stems) {
 
 const hasDrumStem = () => !!song?.stems?.some(x => x.drums) && song.stems.some(x => !x.drums);
 
-/** The music to play: the full mix, or the stems without the drums if they're switched off. */
-function musicBuffer(drumStem = settings.drumStem) {
+/**
+ * The music to play: the full mix, the drumless version made by the AI model ("Remove drums"), or
+ * the stems without the drums if the chart has them separately and they're switched off.
+ */
+function musicBuffer(drumStem = settings.drumStem, noDrums = !!songPrefs().removeDrums) {
+  if (noDrums && song.drumless) return song.drumless;
   if (drumStem || !hasDrumStem()) return song.buffer;
   return (song.backing ||= mixStems(song.stems.filter(x => !x.drums)));
 }
@@ -1419,6 +1428,9 @@ function renderSongInfo() {
   const by = d.format === 'ch' ? 'charted' : 'mapped';
   $('songArtist').textContent = d.plain ? (d.artist || 'Audio file · tempo detected') : d.artist + (d.creator ? ` · ${by} by ${d.creator}` : '');
   $('drumStemRow').hidden = !hasDrumStem();
+  // charts with a separate drum track switch it off instead (above)
+  $('removeDrumsRow').hidden = hasDrumStem();
+  $('removeDrums').checked = !!prefs.removeDrums && !!song.drumless;
   if (d.timing.length) {
     const t = tempoSummary(d.timing, song.durationMs);
     $('songMeta').textContent = [
@@ -1544,6 +1556,9 @@ function renderSync() {
     + `<div class="hint">Total shift applied to the beats: ${total}</div>`;
 }
 
+// a drum, crossed out: the song has a drumless version
+const DRUMLESS_ICON = '<svg class="drumless-icon" viewBox="0 0 24 24" aria-label="Drumless version saved" role="img"><ellipse cx="12" cy="8" rx="8" ry="3"/><path d="M4 8v7c0 1.7 3.6 3 8 3s8-1.3 8-3V8"/><path d="M3 21L21 3"/></svg>';
+
 async function renderLibrary() {
   const items = await library.list();
   $('libraryBox').hidden = !items.length;
@@ -1553,8 +1568,9 @@ async function renderLibrary() {
     const li = document.createElement('li');
     const load = document.createElement('button');
     load.className = 'load' + (song?.key === it.id ? ' active' : '');
-    load.innerHTML = `${escapeHtml(it.title)}<small>${escapeHtml(it.artist)}</small>`;
-    load.title = `${it.artist} – ${it.title}`;
+    const drumless = it.drumless?.v === DRUMLESS_VERSION;
+    load.innerHTML = (drumless ? DRUMLESS_ICON : '') + `${escapeHtml(it.title)}<small>${escapeHtml(it.artist)}</small>`;
+    load.title = `${it.artist} – ${it.title}${drumless ? ' (drumless version saved)' : ''}`;
     load.onclick = () => loadSong(it.files, { fromLibrary: true });
     const del = document.createElement('button');
     del.className = 'del';
@@ -1591,6 +1607,109 @@ window.addEventListener('drop', e => {
   setMode('song');
   handleItems(items);
 });
+
+// ---- remove drums: a drumless version of the song, made by an AI model and kept in the library
+
+/** The song's drumless version, decoded from the library (null if none was made). */
+async function loadDrumless(target) {
+  if (target.drumless) return target.drumless;
+  const rec = await library.get(target.key);
+  if (rec?.drumless?.v !== DRUMLESS_VERSION) return null;
+  try {
+    target.drumless = await audio.decode(new Uint8Array(await rec.drumless.wav.arrayBuffer()));
+  } catch (err) {
+    console.warn('Could not decode the drumless version', err);
+  }
+  return target.drumless || null;
+}
+
+function setRemoveDrums(on) {
+  songPrefs().removeDrums = on;
+  save();
+  $('removeDrums').checked = on;
+}
+
+$('removeDrums').onchange = async e => {
+  if (!e.target.checked) { setRemoveDrums(false); return; }
+  e.target.checked = false; // until the drumless version is there
+  const target = song;
+  if (await loadDrumless(target)) { if (song === target) setRemoveDrums(true); return; }
+  if (song === target) openDrumlessDialog();
+};
+
+const CHECK_ICON = '<svg viewBox="0 0 24 24" aria-hidden="true"><path d="M5 12.5l4.5 4.5L19 7.5"/></svg>';
+let drumlessJob = null; // AbortController of the running conversion
+
+async function openDrumlessDialog() {
+  $('drumlessAsk').hidden = false;
+  $('drumlessPhases').hidden = true;
+  $('drumlessError').hidden = true;
+  $('drumlessGo').hidden = false;
+  $('drumlessGo').disabled = false;
+  $('drumlessCancel').textContent = 'Cancel';
+  const cached = await modelDownloaded(), status = $('drumlessModel');
+  status.classList.toggle('ok', cached);
+  status.innerHTML = cached
+    ? `${CHECK_ICON} The AI model is already downloaded.`
+    : `The model is a one-time download of ${MODEL_MB} MB, then it's kept in your browser.`;
+  $('drumlessDialog').showModal();
+}
+
+/** Shows how far the conversion got: phases before `stage` are done, `stage` is at `value` (0–1). */
+function showDrumlessPhase(stage, value) {
+  const rows = [...$('drumlessPhases').children];
+  const k = stage === 'done' ? rows.length : rows.findIndex(li => li.dataset.stage === stage);
+  rows.forEach((li, i) => {
+    const state = i < k ? 'done' : i === k ? 'active' : '';
+    li.className = state + (state === 'active' && stage === 'load' ? ' busy' : '');
+    if (i === k) li.querySelector('.phase-bar i').style.width = `${Math.round(value * 100)}%`;
+    const label = li.querySelector('.phase-state');
+    if (state === 'done') label.textContent = li.dataset.skipped ? 'already downloaded' : 'done';
+    else if (state === 'active' && stage !== 'load') label.textContent = `${Math.round(value * 100)}%`;
+    else label.textContent = '';
+  });
+}
+
+$('drumlessGo').onclick = async () => {
+  const target = song, job = new AbortController();
+  drumlessJob = job;
+  $('drumlessAsk').hidden = true;
+  $('drumlessGo').hidden = true;
+  $('drumlessError').hidden = true;
+  const download = $('drumlessPhases').querySelector('[data-stage=download]');
+  download.querySelector('.phase-name').textContent = `Downloading the AI model (${MODEL_MB} MB)`;
+  if (await modelDownloaded()) download.dataset.skipped = '1'; else delete download.dataset.skipped;
+  for (const li of $('drumlessPhases').children) li.querySelector('.phase-bar i').style.width = '0';
+  showDrumlessPhase(download.dataset.skipped ? 'load' : 'download', 0);
+  $('drumlessPhases').hidden = false;
+  try {
+    const wav = await removeDrums(target.buffer, { signal: job.signal, onProgress: showDrumlessPhase });
+    showDrumlessPhase('done', 1);
+    target.drumless = await audio.decode(new Uint8Array(await wav.arrayBuffer()));
+    await library.update(target.key, { drumless: { v: DRUMLESS_VERSION, wav } });
+    renderLibrary();
+    if (song === target) {
+      setRemoveDrums(true);
+      if (!settings.songClick) { // without the drums, the click keeps the time
+        settings.songClick = true;
+        $('songClick').checked = true;
+        save();
+        syncClickControls();
+      }
+    }
+    $('drumlessDialog').close();
+  } catch (err) {
+    if (job.signal.aborted) return;
+    console.error(err);
+    $('drumlessError').textContent = `Couldn't remove the drums: ${err?.message || err}`;
+    $('drumlessError').hidden = false;
+    $('drumlessCancel').textContent = 'Close';
+  } finally {
+    if (drumlessJob === job) drumlessJob = null;
+  }
+};
+$('drumlessCancel').onclick = () => $('drumlessDialog').close();
+$('drumlessDialog').addEventListener('close', () => drumlessJob?.abort()); // also on Esc
 
 $('playMode').onchange = e => {
   if (e.target.value === 'auto' && songPrefs().autoHits?.v !== AUTO_CHART_VERSION) { generateChart(); return; }

@@ -314,6 +314,25 @@ input[type=range] { width: 100%; accent-color: var(--accent); margin: 6px 0 2px;
 .dialog.welcome h2 { margin-bottom: 10px; }
 .dialog.welcome p { color: var(--muted); }
 
+/* drum removal */
+.dialog.drumless { width: min(480px, calc(100vw - 32px)); }
+.dialog.drumless h2 { margin-bottom: 10px; }
+.dialog.drumless p { color: var(--muted); }
+.model-status { display: flex; align-items: center; gap: 8px; font-size: 13.5px; }
+.model-status.ok { color: var(--great) !important; }
+.model-status svg { width: 16px; height: 16px; fill: none; stroke: currentColor; stroke-width: 2.5; stroke-linecap: round; stroke-linejoin: round; flex: none; }
+.phases { list-style: none; padding: 0; margin: 14px 0 0; display: flex; flex-direction: column; gap: 12px; }
+.phases li { display: grid; grid-template-columns: 1fr auto; gap: 6px 10px; font-size: 14px; color: var(--faint); }
+.phases li.active, .phases li.done { color: var(--text); }
+.phase-state { font-family: var(--mono); font-size: 12.5px; color: var(--muted); }
+.phases li.done .phase-state { color: var(--great); }
+.phase-bar { grid-column: 1 / -1; height: 6px; border-radius: 3px; background: var(--raised); overflow: hidden; }
+.phase-bar i { display: block; height: 100%; width: 0; background: var(--accent); border-radius: 3px; transition: width .2s; }
+.phases li.done .phase-bar i { width: 100% !important; background: var(--great); }
+.phases li.busy .phase-bar i { width: 30%; animation: busy 1.2s ease-in-out infinite; }
+@keyframes busy { from { transform: translateX(-100%); } to { transform: translateX(340%); } }
+.library li button.load .drumless-icon { width: 15px; height: 15px; vertical-align: -3px; margin-right: 6px; fill: none; stroke: var(--accent); stroke-width: 1.8; stroke-linecap: round; }
+
 /* guided tour */
 .tour-blocker { position: fixed; inset: 0; z-index: 100; }
 .tour-spot {

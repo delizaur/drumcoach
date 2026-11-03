@@ -146,6 +146,7 @@
               <input id="chartVolume" type="range" min="0" max="1" step="0.01">
             </div>
             <label class="switch" id="drumStemRow" hidden><input type="checkbox" id="drumStem"><span class="track"></span>Drums in the music <span class="info" tabindex="0" role="button" aria-label="More info">i<span class="tip" role="tooltip">This chart comes with the drums as a separate audio track. Turn this off to play along without the original drummer.</span></span></label>
+            <label class="switch" id="removeDrumsRow"><input type="checkbox" id="removeDrums"><span class="track"></span>Remove drums <span class="info" tabindex="0" role="button" aria-label="More info">i<span class="tip" role="tooltip">An AI model splits the song into its instruments and leaves out the drums, so you can play in place of the drummer. It's done once per song, and the drumless version is saved in your library.</span></span></label>
             <label class="switch"><input type="checkbox" id="songClick"><span class="track"></span>Click track over the song</label>
         </div>
         <section class="pane">
@@ -423,6 +424,26 @@
       <div class="dialog-actions">
         <button class="btn" id="welcomeSkip" type="button">Skip</button>
         <button class="btn primary" id="welcomeTour" type="button">Take the tour</button>
+      </div>
+    </div>
+  </dialog>
+
+  <dialog id="drumlessDialog" class="dialog drumless">
+    <div class="dialog-inner">
+      <h2>Remove the drums</h2>
+      <div id="drumlessAsk">
+        <p>Removing the drums uses an AI model that splits the song into its instruments, right here in your browser. The model has to be fetched from Hugging Face, and the conversion can take 1–2 minutes.</p>
+        <p class="model-status" id="drumlessModel"></p>
+      </div>
+      <ol class="phases" id="drumlessPhases" hidden>
+        <li data-stage="download"><span class="phase-name">Downloading the AI model</span><span class="phase-state"></span><div class="phase-bar"><i></i></div></li>
+        <li data-stage="load"><span class="phase-name">Loading it into memory</span><span class="phase-state"></span><div class="phase-bar"><i></i></div></li>
+        <li data-stage="separate"><span class="phase-name">Removing the drums</span><span class="phase-state"></span><div class="phase-bar"><i></i></div></li>
+      </ol>
+      <p class="error" id="drumlessError" hidden></p>
+      <div class="dialog-actions">
+        <button class="btn" id="drumlessCancel" type="button">Cancel</button>
+        <button class="btn primary" id="drumlessGo" type="button">Continue</button>
       </div>
     </div>
   </dialog>

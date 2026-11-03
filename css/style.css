@@ -7,9 +7,9 @@
   --text: #e8ebf1;
   --muted: #8d96a7;
   --faint: #5b6476;
-  --accent: #ffb22e;
-  --accent-strong: #f5a016;
-  --accent-soft: rgba(255, 178, 46, 0.14);
+  --accent: #8f7dff;
+  --accent-strong: #7461f5;
+  --accent-soft: rgba(143, 125, 255, 0.14);
 
   --perfect: #45d0ff;
   --great: #5ee38c;
@@ -78,7 +78,7 @@ output { font-family: var(--mono); color: var(--text); font-size: 12.5px; margin
 .btn:disabled { opacity: .45; cursor: not-allowed; }
 .btn.ghost { background: transparent; }
 .btn.ghost:hover { background: var(--panel-2); }
-.btn.primary { background: var(--accent-strong); border-color: var(--accent-strong); color: #1d1405; font-weight: 600; }
+.btn.primary { background: var(--accent-strong); border-color: var(--accent-strong); color: #fff; font-weight: 600; }
 .btn.primary:hover { background: var(--accent); }
 .btn.icon { width: 34px; height: 34px; padding: 0; display: inline-grid; place-items: center; font-size: 17px; flex: none; }
 .nocase { text-transform: none; }
@@ -159,7 +159,7 @@ input[type=range] { width: 100%; accent-color: var(--accent); margin: 6px 0 2px;
 .error { color: var(--miss); font-size: 13px; }
 
 .song-card { position: relative; overflow: hidden; border-radius: var(--radius); margin: 14px 0; border: 1px solid var(--border); min-height: 96px; display: flex; align-items: flex-end; }
-.song-bg { position: absolute; inset: 0; background: linear-gradient(135deg, #3a2a12, #142033) center/cover; }
+.song-bg { position: absolute; inset: 0; background: linear-gradient(135deg, #2a2350, #142033) center/cover; }
 .song-bg::after { content: ""; position: absolute; inset: 0; background: linear-gradient(to top, rgba(10, 12, 16, .95), rgba(10, 12, 16, .35)); }
 .song-text { position: relative; padding: 14px; }
 .song-title { font-size: 17px; font-weight: 700; line-height: 1.25; }
@@ -207,7 +207,7 @@ input[type=range] { width: 100%; accent-color: var(--accent); margin: 6px 0 2px;
 .pattern-preview .beat { display: flex; gap: 2px; padding: 4px; border-radius: 6px; background: var(--panel-2); }
 .pattern-preview .slot { width: 12px; height: 18px; border-radius: 3px; background: var(--raised); }
 .pattern-preview .slot.on { background: var(--accent); }
-.pattern-preview .slot.on.first { background: #ffe0a3; }
+.pattern-preview .slot.on.first { background: #c9c0ff; }
 .pattern-preview .slot.on.secondary { background: transparent; box-shadow: inset 0 0 0 1.5px var(--accent); }
 
 /* ---------- practice area ---------- */

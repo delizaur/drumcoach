@@ -292,6 +292,8 @@ input[type=range] { width: 100%; accent-color: var(--accent); margin: 6px 0 2px;
 .seek-ghost span { position: absolute; top: -4px; left: 5px; font: 11px var(--mono); color: var(--text); background: var(--raised); border: 1px solid var(--border); border-radius: 4px; padding: 0 4px; white-space: nowrap; }
 
 .foot { text-align: center; color: var(--faint); font-size: 12.5px; padding: 6px 22px 22px; }
+.foot a { color: var(--muted); }
+.foot a:hover { color: var(--text); }
 
 /* ---------- dialogs ---------- */
 .dialog {

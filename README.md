@@ -89,3 +89,7 @@ js/tour.js        guided tour (highlight and card next to each control)
 ```
 
 For debugging, `window.drumgrade` in the browser console exposes the audio engine, the MIDI input, the settings, the current session and the replay being watched.
+
+## License
+
+The code is under the [MIT License](LICENSE). The ADTOF model in `models/adtof/` keeps its own license, CC BY-NC-SA 4.0 (non-commercial use only); see the files there. The HTDemucs model is downloaded from Hugging Face and is MIT licensed.
